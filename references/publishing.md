@@ -5,7 +5,10 @@
 Bundle = self-contained `index.html` (CSS/JS inlined, no CDNs, no build step).
 Do NOT include the SDK script tag — `host.py` injects
 `<script src="https://usions.com/usion-sdk.js"></script>` into `<head>` at
-deploy time (`backend/services/miniapp_builder/host.py`).
+deploy time (`backend/services/miniapp_builder/host.py`). `host.py` also
+**rewrites a devkit app's relative `/usion-sdk.js` reference** to the real
+bundle at deploy, so an app scaffolded with `npx @usions/devkit create` and
+tested locally publishes unchanged — no script-tag edits before shipping.
 
 Hosting (S3, bucket `mongolgpt-messenger`, ap-southeast-1; served via the
 custom domain when `AWS_S3_CUSTOM_DOMAIN` is set; `CacheControl: no-cache`):

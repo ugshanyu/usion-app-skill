@@ -26,6 +26,12 @@ global object: `window.Usion`.
 | [references/multiplayer.md](references/multiplayer.md) | The app is a multiplayer game — room lifecycle, host-authoritative pattern, netcode helpers |
 | [references/publishing.md](references/publishing.md) | You're deploying/registering the app — hosting paths, service registry, and links to live deployed exemplar apps |
 
+Beyond this skill, the repo ships reference-grade docs: `docs/sdk-guides/`
+(six bilingual recipes — start here for a guided build), `docs/sdk-api/`
+(generated TypeDoc), `docs/sdk-versioning-policy.md`, and the
+`@usions/devkit` local dev harness (Step 5). Fastest start of all:
+`npx @usions/devkit create <template>` then edit a working game.
+
 ## Step 1 — Decide the delivery path
 
 There are two ways an app reaches users. Pick one first; it changes everything
@@ -108,15 +114,41 @@ Read [references/multiplayer.md](references/multiplayer.md). The core contract:
 - `action()` is sequenced + stored (turn-based moves); `realtime()` is
   fire-and-forget (per-frame state). Never trust a peer's self-reported score
   for paid outcomes — compute on the host.
-- Handle `onPlayerLeft` (forfeit/win) and `onDisconnect`/`onReconnect`.
+- Handle `onPlayerLeft` (forfeit/win), `onDisconnect`/`onReconnect`, and
+  `onPlayerConnection` (peer `reconnecting`/`gone` during the grace window).
+- **Reliability contract for turn-based games:** apply moves only on the
+  `onAction` echo (the SDK dedups by sequence — never apply optimistically on
+  send), pass `{ nextTurn }` and trust `current_turn`, and have the host
+  checkpoint via `Usion.game.setState()`. This is what makes a game survive
+  reconnects; the full recipe is `docs/sdk-guides/02-bulletproof-turn-based.md`.
 
 ## Step 5 — Test before calling it done
 
-- Open the app locally and verify `Usion.init` fires (the SDK no-ops gracefully
-  outside the host, but state your assumptions).
-- For multiplayer: test with two browser windows; use
-  `Usion.game.simulateNetwork({ latencyMs, jitterMs, lossPct })` to verify it
-  survives bad networks.
+**The fastest path: `@usions/devkit`** — build and test a Usion game locally
+with NO account, NO deployment, and NO second phone. The dev harness serves your
+app in a fake host page that emulates the iframe protocol with the REAL relay
+semantics (echo, sequences, sync):
+
+```bash
+npx @usions/devkit create turn-based-duel my-game  # or realtime-duel | solo-cloud
+npx @usions/devkit dev ./my-game                   # serves on http://localhost:4747
+# open http://localhost:4747/ and .../?player=2  → two tabs = two players, one room
+npx @usions/devkit audit ./my-game                 # static pre-ship checks
+```
+
+The harness has latency/drop sliders and a **⚡ Blip connection** chaos toggle
+that drops + auto-recovers the relay exactly like production — so you SEE your
+reconnect UX (`onPlayerConnection: reconnecting → gone`) locally instead of
+shipping and praying. The starter templates pass the chaos panel out of the box
+and ARE the documentation most developers read — clone one before writing from
+scratch. Not emulated: matchmaking/invites (the platform drops you into a room).
+
+`usion audit` checks payload size (warn 2 MB / fail 5 MB), page basics
+(viewport/lang/title), SDK usage, and — for multiplayer apps — the
+reliability-contract handlers (`onAction`, `onSync`, `nextTurn`).
+
+Other checks:
+- Verify `Usion.init` fires (the SDK no-ops gracefully outside the host).
 - Grep your own code for fictional SDK calls (`Usion.ready`, `Usion.game.emit`,
   `Usion.user.info`) — the platform's quality checker will flag them.
 - Cloud KV end-to-end: `cd backend && python -m scripts.test_cloud_kv`.

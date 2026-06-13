@@ -1,16 +1,22 @@
 # Usion SDK — full API reference
 
 Source of truth: `packages/sdk/src/modules/*.js` and `packages/sdk/types/index.d.ts`
-(npm `@usions/sdk`, version in `packages/sdk/package.json` — 2.11.x at time of
+(npm `@usions/sdk`, version in `packages/sdk/package.json` — 2.12.x at time of
 writing). The browser bundle is served at `https://usions.com/usion-sdk.js`.
 If anything here disagrees with the source, the source wins.
+
+Deeper docs (generated + hand-written): `docs/sdk-api/` (TypeDoc reference),
+`docs/sdk-guides/` (six bilingual recipes incl. "Bulletproof turn-based duel"
+— the reliability contract as a tutorial), `docs/sdk-versioning-policy.md`
+(what's public API + the injected-bundle back-compat rule), and
+`docs/sdk-handoff.md` (architecture orientation).
 
 ## Contents
 
 1. [Lifecycle & config](#lifecycle--config)
 2. [User](#user) · [Wallet](#wallet) · [Session](#session)
 3. [Storage (device-local)](#storage-device-local) · [File storage](#file-storage) · [Cloud KV](#cloud-kv-server-persisted)
-4. [Game (multiplayer)](#game-multiplayer)
+4. [Game (multiplayer)](#game-multiplayer) · [Errors & diagnostics](#errors--diagnostics)
 5. [Lobby](#lobby) · [Matchmaking](#matchmaking) · [Leaderboard](#leaderboard)
 6. [Chat](#chat) · [Bot](#bot)
 7. [Results, sharing, misc root methods](#results-sharing-misc)
@@ -129,28 +135,57 @@ Usion.game.connectDirect({roomId?, serviceId?, apiUrl?, token?})  // force direc
 ### Sending
 
 ```javascript
-Usion.game.action(type, data?)    // Promise<{success, sequence?}> — sequenced + stored; turn-based moves
+Usion.game.action(type, data?, opts?)  // Promise<{success, sequence?}> — sequenced + stored; turn-based moves
+//   opts.nextTurn: playerId whose turn comes next — server remembers it and
+//     returns it as current_turn on join/sync, so turn survives reconnects.
+//   opts.queueOffline: hold this move while disconnected and send it (in order)
+//     after recovery instead of rejecting NOT_CONNECTED. Turn-based only;
+//     cap 20 then QUEUE_FULL. Never queue realtime-style inputs.
 Usion.game.realtime(type, data?)  // fire-and-forget — per-frame state, positions, effects
+Usion.game.setState(state)        // Promise<{success, code?}> — AUTHORITY only (playerIds[0]):
+//     checkpoint authoritative state (≤64 KB); rejoining clients get it as
+//     game_state in the join ack and onSync. Checkpoint at meaningful transitions.
 Usion.game.requestSync(lastSeq?)  // ask server for full state → onSync
 Usion.game.requestRematch()
 Usion.game.forfeit()              // Promise<{success}>
 ```
 
+**Reliability contract** (what generated/3rd-party games rely on — see
+`docs/sdk-guides/02-bulletproof-turn-based.md`): apply moves ONLY on the
+`onAction` echo (every action echoes to the sender with its authoritative
+sequence; the SDK dedups by sequence, so exactly-once even across reconnect
+replays) — never optimistically on send. Pass `{ nextTurn }` and trust
+`current_turn` from join/sync rather than deriving the turn locally. The
+authority checkpoints via `setState`. Handle `onDisconnect`/`onReconnect`/
+`onPlayerConnection`.
+
 ### Handlers
 
+Every `onX(cb)` keeps "single handler, last one wins" for back-compat but now
+**returns an unsubscribe function**. For multiple listeners use
+`game.on(event, cb)` — any number of listeners, works before `connect()` in
+every transport, also returns an unsubscribe fn. Accepts internal names
+(`'action'`), wire names (`'game:action'`), or snake_case (`'player_joined'`).
+
 ```javascript
-Usion.game.onJoined(d)         // local join confirmed
-Usion.game.onPlayerJoined(d)   // d.player_id, d.player_ids (full updated roster)
-Usion.game.onPlayerLeft(d)     // d.player_id
-Usion.game.onStateUpdate(d)    // d.game_state, d.current_turn, d.sequence
-Usion.game.onSync(d)           // d.actions[], d.game_state, d.sequence
-Usion.game.onAction(m)         // m.player_id, m.action_type, m.action_data, m.sequence
-Usion.game.onRealtime(m)       // m.player_id, m.action_type, m.action_data
-Usion.game.onGameFinished(d)   // d.winner_ids[], d.reason?, d.forfeiter?
-Usion.game.onGameRestarted(d)  // rematch; sequence resets to 0
+const off = Usion.game.onAction(cb); // ...later: off();
+Usion.game.on('player_joined', cb);  // additional listener, returns unsubscribe
+
+Usion.game.onJoined(d)           // local join confirmed
+Usion.game.onPlayerJoined(d)     // d.player_id, d.player_ids (full updated roster)
+Usion.game.onPlayerLeft(d)       // d.player_id
+Usion.game.onStateUpdate(d)      // d.game_state, d.current_turn, d.sequence
+Usion.game.onSync(d)             // d.actions[], d.game_state, d.current_turn, d.sequence
+Usion.game.onAction(m)           // m.player_id, m.action_type, m.action_data, m.sequence, m.current_turn?
+Usion.game.onRealtime(m)         // m.player_id, m.action_type, m.action_data
+Usion.game.onGameFinished(d)     // d.winner_ids[], d.reason?, d.forfeiter?
+Usion.game.onGameRestarted(d)    // rematch; sequence resets to 0
 Usion.game.onRematchRequest(d)
-Usion.game.onError(d)          // d.message, d.code?
+Usion.game.onError(d)            // d.message, d.code?
 Usion.game.onDisconnect(reason) / onReconnect(attempt) / onConnectionError(err)
+Usion.game.onPlayerConnection(d) // d.player_id, d.state: 'connected'|'reconnecting'|'gone'
+//   — peer connection lifecycle: 'reconnecting' during the ~15s grace window,
+//     'gone' if they don't return. Use it to pause/show "opponent reconnecting".
 ```
 
 ### State persistence (iframe remount recovery)
@@ -184,6 +219,26 @@ Usion.game.replica({channel?, interpolate?})            // client: receive + vie
 Usion.game.simulateNetwork({latencyMs?, jitterMs?, lossPct?, dupPct?} | null)
 Usion.game.ping()    // Promise<number|null> RTT ms
 Usion.game.getRtt()  // smoothed RTT
+```
+
+## Errors & diagnostics
+
+Branch on `err.code` (stable, part of the public API), never on message text.
+
+```javascript
+Usion.ERROR_CODES   // { NOT_CONNECTED, NO_ROOM, ROOM_NOT_FOUND, NOT_PARTICIPANT,
+                    //   NOT_AUTHORITY, NOT_AUTHENTICATED, JOIN_TIMEOUT, CONNECT_TIMEOUT,
+                    //   STATE_TOO_LARGE, INVALID_STATE, INVALID_NEXT_TURN, RATE_LIMITED,
+                    //   REQUEST_TIMEOUT, QUEUE_FULL, UNSUPPORTED, UNKNOWN }
+Usion.UsionError    // class; err.code is one of the above, err.name === 'UsionError'
+
+try { await Usion.game.setState(huge); }
+catch (e) { if (e.code === Usion.ERROR_CODES.STATE_TOO_LARGE) trimAndRetry(); }
+
+Usion.diagnostics()  // { version, transport:'socket'|'proxy'|'direct'|'none',
+                     //   connected, joined, roomId, playerId, lastSequence,
+                     //   lastActionApplied, rejoining }
+// Auto-attached to game.debug() payloads as _diag; surfaced in the ?debug=1 overlay.
 ```
 
 ## Lobby
