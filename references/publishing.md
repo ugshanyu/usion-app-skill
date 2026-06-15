@@ -5,10 +5,7 @@
 Bundle = self-contained `index.html` (CSS/JS inlined, no CDNs, no build step).
 Do NOT include the SDK script tag — `host.py` injects
 `<script src="https://usions.com/usion-sdk.js"></script>` into `<head>` at
-deploy time (`backend/services/miniapp_builder/host.py`). `host.py` also
-**rewrites a devkit app's relative `/usion-sdk.js` reference** to the real
-bundle at deploy, so an app scaffolded with `npx @usions/devkit create` and
-tested locally publishes unchanged — no script-tag edits before shipping.
+deploy time (`backend/services/miniapp_builder/host.py`).
 
 Hosting (S3, bucket `mongolgpt-messenger`, ap-southeast-1; served via the
 custom domain when `AWS_S3_CUSTOM_DOMAIN` is set; `CacheControl: no-cache`):
@@ -51,6 +48,69 @@ Avoid all five by construction.
    scripts run against the PRODUCTION MongoDB (see CLAUDE.md) — read before
    writing, prefix test entities.
 4. Local dev ports are assigned in CLAUDE.md's Service Ports table; add yours.
+
+## Path C — Programmatic registration with an API token (agents / automation)
+
+When an AI agent or script registers and manages services without a human in
+the loop, authenticate with a **personal API token** instead of a seed script.
+
+1. The owner mints a token in the app: **Service Creator → Agent API Access →
+   Create API token**. The raw token (`usion_sk_…`) is shown **once** — copy it.
+   Tokens are long-lived, revocable, and listed/revoked from the same screen.
+2. The agent calls the registry with `Authorization: Bearer usion_sk_…`. The
+   token acts as the owning user but is **scoped to service management only** —
+   it is rejected on wallet/chat/etc., so it's safe to hand to an agent.
+
+```
+POST   {API_URL}/registry/services/register          # register (app/game/bot/skill)
+GET    {API_URL}/registry/services/my                 # list your services
+PUT    {API_URL}/registry/services/my/{id}            # update
+PATCH  {API_URL}/registry/services/my/{id}/publish    # publish / unpublish
+DELETE {API_URL}/registry/services/my/{id}            # delete
+POST   {API_URL}/registry/services/my/{id}/notify-secret   # mint/rotate notify secret
+```
+
+Register body matches the Service Creator form: `{name, description, service_type,
+iframe_url, cost, tags, is_published, realtime?, max_players?, ...}`. A `bot`
+service also returns `bot_credentials` (token + webhook secret) once.
+
+Token management endpoints (`POST/GET/DELETE /registry/api-tokens`) require a
+real login session — an API token cannot mint more API tokens (no escalation).
+
+E2E test: `cd backend && python -m scripts.test_api_tokens`.
+
+## Server-triggered notifications (your backend → a Usion user)
+
+When a job finishes while the app is closed (e.g. a video render), your own
+backend notifies the user via the signed REST endpoint — the in-app
+`Usion.notify` only works while the app is open.
+
+```
+POST {API_URL}/services/{service_id}/notify
+Header  X-Usion-Signature: <hex HMAC-SHA256 of the raw body>
+Body    {"user_id": "...", "title": "...", "body": "...", "path": "/optional/in-app/path"}
+```
+
+- **Auth:** HMAC-SHA256 over the exact raw request body, keyed by the service's
+  `realtime.signing.shared_secret` (≥ 16 chars). Mint/rotate it yourself via
+  `POST /registry/services/my/{id}/notify-secret` (returns the secret once; see
+  Path C) or set it in a seed script. `403` if no secret is configured, `401` on
+  signature mismatch.
+- **Scope/limits:** identical to `Usion.notify` — only that service's user,
+  ≤ 20/hour per user, title/body/path sanitized + capped, muted users dropped.
+- Online users get an in-app banner; offline users get an OS push that reopens
+  the app at `path`. Response: `{"success": true, "delivered": "banner"|"push"|"muted"}`.
+
+Node example:
+
+```javascript
+const body = JSON.stringify({ user_id, title: 'Render complete', body: 'Tap to view', path: `/render/${id}` });
+const sig = crypto.createHmac('sha256', SHARED_SECRET).update(body).digest('hex');
+await fetch(`${API_URL}/services/${SERVICE_ID}/notify`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Usion-Signature': sig }, body });
+```
+
+E2E test: `cd backend && python -m scripts.test_notifications`.
 
 ## Releasing an SDK change (only if the app needs a new SDK API)
 

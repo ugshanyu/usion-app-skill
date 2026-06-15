@@ -1,22 +1,16 @@
 # Usion SDK — full API reference
 
 Source of truth: `packages/sdk/src/modules/*.js` and `packages/sdk/types/index.d.ts`
-(npm `@usions/sdk`, version in `packages/sdk/package.json` — 2.12.x at time of
+(npm `@usions/sdk`, version in `packages/sdk/package.json` — 2.13.x at time of
 writing). The browser bundle is served at `https://usions.com/usion-sdk.js`.
 If anything here disagrees with the source, the source wins.
-
-Deeper docs (generated + hand-written): `docs/sdk-api/` (TypeDoc reference),
-`docs/sdk-guides/` (six bilingual recipes incl. "Bulletproof turn-based duel"
-— the reliability contract as a tutorial), `docs/sdk-versioning-policy.md`
-(what's public API + the injected-bundle back-compat rule), and
-`docs/sdk-handoff.md` (architecture orientation).
 
 ## Contents
 
 1. [Lifecycle & config](#lifecycle--config)
 2. [User](#user) · [Wallet](#wallet) · [Session](#session)
 3. [Storage (device-local)](#storage-device-local) · [File storage](#file-storage) · [Cloud KV](#cloud-kv-server-persisted)
-4. [Game (multiplayer)](#game-multiplayer) · [Errors & diagnostics](#errors--diagnostics)
+4. [Game (multiplayer)](#game-multiplayer)
 5. [Lobby](#lobby) · [Matchmaking](#matchmaking) · [Leaderboard](#leaderboard)
 6. [Chat](#chat) · [Bot](#bot)
 7. [Results, sharing, misc root methods](#results-sharing-misc)
@@ -30,12 +24,25 @@ Deeper docs (generated + hand-written): `docs/sdk-api/` (TypeDoc reference),
 Usion.init(callback)   // callback(config) — fires once config arrives from host
 Usion.version          // SDK version string
 Usion.config           // read-only current config
+Usion.getLaunchParams() // {path, ref, roomId} — how the host opened this app
 ```
 
 `config` fields: `userId, userName, userAvatar, authToken, sessionId,
 sessionData, balance, results, theme ('light'|'dark'), language, socketUrl,
 webTransportUrl, roomId, playerIds, serviceId, serviceName, apiUrl,
-connectionMode ('platform'|'direct')`.
+connectionMode ('platform'|'direct'), launchPath, ref`.
+
+**Deep-linking:** when the user taps a notification carrying a `path`, the app
+reopens and `Usion.getLaunchParams().path` returns that path. Read it in your
+`init` callback and route to the right screen (the host never drives your
+internal router — it just hands you the path). Example:
+
+```javascript
+Usion.init(() => {
+  const { path } = Usion.getLaunchParams();
+  if (path) router.go(path);   // your app's own routing
+});
+```
 
 Contexts: **embedded** (iframe/WebView — everything relayed via postMessage to
 the host's authenticated socket), **standalone** (own Socket.IO socket; needs
@@ -59,11 +66,37 @@ Credits only — never move money any other way.
 ```javascript
 Usion.wallet.getBalance()                       // Promise<number> (cached, refreshed on BALANCE_UPDATE)
 Usion.wallet.hasCredits(amount)                 // Promise<boolean>
-Usion.wallet.requestPayment(amount, reason, data?)
+Usion.wallet.requestPayment(amount, reason, opts?)
 // → Promise<{success, newBalance?, receiptToken?, transactionId?}>
-// Host shows a confirmation dialog; rejects on decline or 60s timeout.
+// Host shows a confirmation dialog; resolves with a receiptToken your SERVER
+// later settles/refunds. Rejects on decline, or only after confirming no charge
+// happened.
 Usion.wallet.onBalanceChange(cb)                // cb(balance)
 ```
+
+### Charging safely (idempotency + recovery)
+
+The charge is debited the moment the user confirms; you get a `receiptToken`
+your server settles (work succeeded) or refunds (work failed).
+
+- **Reliability is built in.** If the confirmation message is lost (flaky
+  network, backgrounded tab), the SDK re-queries the host and recovers the
+  `receiptToken` instead of failing — so a paid charge is never stranded. You
+  don't have to do anything for this.
+- **Make retries safe with an idempotency key.** If your app might call
+  `requestPayment` twice for the same thing (a retry button, an auto-retry on
+  error), pass a stable `idempotencyKey`. The platform dedupes on it: the user
+  is charged **at most once** and both calls return the **same** `receiptToken` —
+  no second dialog.
+
+```javascript
+// One purchase "intent" → one stable key (reuse it across retries).
+const key = `buy-pack-${userId}-${packId}`;
+const { receiptToken } = await Usion.wallet.requestPayment(100, 'Pack of 100', { idempotencyKey: key });
+// Hand receiptToken to YOUR server; settle/refund it after the work runs.
+```
+
+Omit `opts` (or `idempotencyKey`) for the simple one-shot behavior.
 
 ## Session
 
@@ -135,57 +168,28 @@ Usion.game.connectDirect({roomId?, serviceId?, apiUrl?, token?})  // force direc
 ### Sending
 
 ```javascript
-Usion.game.action(type, data?, opts?)  // Promise<{success, sequence?}> — sequenced + stored; turn-based moves
-//   opts.nextTurn: playerId whose turn comes next — server remembers it and
-//     returns it as current_turn on join/sync, so turn survives reconnects.
-//   opts.queueOffline: hold this move while disconnected and send it (in order)
-//     after recovery instead of rejecting NOT_CONNECTED. Turn-based only;
-//     cap 20 then QUEUE_FULL. Never queue realtime-style inputs.
+Usion.game.action(type, data?)    // Promise<{success, sequence?}> — sequenced + stored; turn-based moves
 Usion.game.realtime(type, data?)  // fire-and-forget — per-frame state, positions, effects
-Usion.game.setState(state)        // Promise<{success, code?}> — AUTHORITY only (playerIds[0]):
-//     checkpoint authoritative state (≤64 KB); rejoining clients get it as
-//     game_state in the join ack and onSync. Checkpoint at meaningful transitions.
 Usion.game.requestSync(lastSeq?)  // ask server for full state → onSync
 Usion.game.requestRematch()
 Usion.game.forfeit()              // Promise<{success}>
 ```
 
-**Reliability contract** (what generated/3rd-party games rely on — see
-`docs/sdk-guides/02-bulletproof-turn-based.md`): apply moves ONLY on the
-`onAction` echo (every action echoes to the sender with its authoritative
-sequence; the SDK dedups by sequence, so exactly-once even across reconnect
-replays) — never optimistically on send. Pass `{ nextTurn }` and trust
-`current_turn` from join/sync rather than deriving the turn locally. The
-authority checkpoints via `setState`. Handle `onDisconnect`/`onReconnect`/
-`onPlayerConnection`.
-
 ### Handlers
 
-Every `onX(cb)` keeps "single handler, last one wins" for back-compat but now
-**returns an unsubscribe function**. For multiple listeners use
-`game.on(event, cb)` — any number of listeners, works before `connect()` in
-every transport, also returns an unsubscribe fn. Accepts internal names
-(`'action'`), wire names (`'game:action'`), or snake_case (`'player_joined'`).
-
 ```javascript
-const off = Usion.game.onAction(cb); // ...later: off();
-Usion.game.on('player_joined', cb);  // additional listener, returns unsubscribe
-
-Usion.game.onJoined(d)           // local join confirmed
-Usion.game.onPlayerJoined(d)     // d.player_id, d.player_ids (full updated roster)
-Usion.game.onPlayerLeft(d)       // d.player_id
-Usion.game.onStateUpdate(d)      // d.game_state, d.current_turn, d.sequence
-Usion.game.onSync(d)             // d.actions[], d.game_state, d.current_turn, d.sequence
-Usion.game.onAction(m)           // m.player_id, m.action_type, m.action_data, m.sequence, m.current_turn?
-Usion.game.onRealtime(m)         // m.player_id, m.action_type, m.action_data
-Usion.game.onGameFinished(d)     // d.winner_ids[], d.reason?, d.forfeiter?
-Usion.game.onGameRestarted(d)    // rematch; sequence resets to 0
+Usion.game.onJoined(d)         // local join confirmed
+Usion.game.onPlayerJoined(d)   // d.player_id, d.player_ids (full updated roster)
+Usion.game.onPlayerLeft(d)     // d.player_id
+Usion.game.onStateUpdate(d)    // d.game_state, d.current_turn, d.sequence
+Usion.game.onSync(d)           // d.actions[], d.game_state, d.sequence
+Usion.game.onAction(m)         // m.player_id, m.action_type, m.action_data, m.sequence
+Usion.game.onRealtime(m)       // m.player_id, m.action_type, m.action_data
+Usion.game.onGameFinished(d)   // d.winner_ids[], d.reason?, d.forfeiter?
+Usion.game.onGameRestarted(d)  // rematch; sequence resets to 0
 Usion.game.onRematchRequest(d)
-Usion.game.onError(d)            // d.message, d.code?
+Usion.game.onError(d)          // d.message, d.code?
 Usion.game.onDisconnect(reason) / onReconnect(attempt) / onConnectionError(err)
-Usion.game.onPlayerConnection(d) // d.player_id, d.state: 'connected'|'reconnecting'|'gone'
-//   — peer connection lifecycle: 'reconnecting' during the ~15s grace window,
-//     'gone' if they don't return. Use it to pause/show "opponent reconnecting".
 ```
 
 ### State persistence (iframe remount recovery)
@@ -219,26 +223,6 @@ Usion.game.replica({channel?, interpolate?})            // client: receive + vie
 Usion.game.simulateNetwork({latencyMs?, jitterMs?, lossPct?, dupPct?} | null)
 Usion.game.ping()    // Promise<number|null> RTT ms
 Usion.game.getRtt()  // smoothed RTT
-```
-
-## Errors & diagnostics
-
-Branch on `err.code` (stable, part of the public API), never on message text.
-
-```javascript
-Usion.ERROR_CODES   // { NOT_CONNECTED, NO_ROOM, ROOM_NOT_FOUND, NOT_PARTICIPANT,
-                    //   NOT_AUTHORITY, NOT_AUTHENTICATED, JOIN_TIMEOUT, CONNECT_TIMEOUT,
-                    //   STATE_TOO_LARGE, INVALID_STATE, INVALID_NEXT_TURN, RATE_LIMITED,
-                    //   REQUEST_TIMEOUT, QUEUE_FULL, UNSUPPORTED, UNKNOWN }
-Usion.UsionError    // class; err.code is one of the above, err.name === 'UsionError'
-
-try { await Usion.game.setState(huge); }
-catch (e) { if (e.code === Usion.ERROR_CODES.STATE_TOO_LARGE) trimAndRetry(); }
-
-Usion.diagnostics()  // { version, transport:'socket'|'proxy'|'direct'|'none',
-                     //   connected, joined, roomId, playerId, lastSequence,
-                     //   lastActionApplied, rejoining }
-// Auto-attached to game.debug() payloads as _diag; surfaced in the ?debug=1 overlay.
 ```
 
 ## Lobby
@@ -301,6 +285,36 @@ Usion.bot.close(result?)
 Usion.bot.onMessage(cb)              // cb({id, content, components?, sender_id})
 ```
 
+### Push notifications
+
+When a service/bot message reaches a user who is **offline**, the user now gets a
+push notification showing the **service/bot name** + the **message preview** (text,
+or `📷 Photo` / `🎵 Voice message` / `📍 Location` / `🎮 <game>` for media/components).
+Tapping it opens the chat. No setup needed — it fires automatically on send.
+Personal 1-on-1 messages stay end-to-end encrypted, so their pushes show the sender
+name but a generic body ("Sent you a message"), never decrypted content.
+
+## Notify
+
+Let your app notify ITS OWN user — even when they aren't looking at it. Delivery
+is context-aware: an in-app banner when the user is online elsewhere in Usion, an
+OS push when they're offline or the app is backgrounded. Tapping reopens your app
+(at `path`, if given). SDK ≥ 2.13. Backend: `backend/realtime/notify_handlers.py`.
+
+```javascript
+Usion.notify.send({ title, body, path? })  // Promise<{success, delivered}>
+Usion.notify.setMuted(muted)               // user opt-out for this app
+Usion.notify.isMuted()                     // Promise<boolean>
+```
+
+- `path` deep-links into your app — a safe **relative** path (`/render/abc`);
+  read it back on launch via `Usion.getLaunchParams().path`.
+- **Scope:** you can only notify the **current** user — never fan out to others.
+- **Limits:** ≤ 20 notifications/hour per user per service; `title` ≤ 80 chars,
+  `body` ≤ 200, `path` ≤ 512. Muted services are silently dropped.
+- **Server-triggered** (job finishes while the app is closed): your own backend
+  calls the signed `POST /services/{id}/notify` — see `references/publishing.md`.
+
 ## Results, sharing, misc
 
 ```javascript
@@ -337,7 +351,7 @@ Design tokens: `https://usions.com/usion-design-system.css`.
 
 `Usion._backendEmit(event, data)` routes through the app's own socket
 (standalone) or the host's authenticated socket (embedded). Embedded mode only
-allows these prefixes: **`lobby:*`, `mm:*`, `lb:*`, `kv:*`**. A new prefix
+allows these prefixes: **`lobby:*`, `mm:*`, `lb:*`, `kv:*`, `notify:*`**. A new prefix
 requires editing `BACKEND_EMIT_ALLOWED` in BOTH
 `web/app/(main)/chat/iframe/[id]/game-handlers.ts` and
 `mobile/features/iframe/message-handler.ts`, plus a backend

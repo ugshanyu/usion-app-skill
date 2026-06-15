@@ -62,42 +62,14 @@ Rules:
   → pause + `Usion.game.requestSync()` on recovery.
 - Persist across iframe remounts with `Usion.game.saveState/loadState`.
 
-## Turn-based pattern — the reliability contract
+## Turn-based pattern
 
-Use `action()` + `onAction` instead of the realtime loop. Get these four rules
-right and the game survives every socket blip (full tutorial:
-`docs/sdk-guides/02-bulletproof-turn-based.md`):
-
-1. **Apply on the echo, never on send.** Every `action()` echoes back to the
-   sender with an authoritative `sequence`. Apply state ONLY in `onAction`, so
-   all clients apply identical moves in identical order. The SDK dedups by
-   sequence (exactly-once, even across reconnect replays) — applying
-   optimistically on send is the classic turn-desync bug.
-2. **Pass `{ nextTurn }`; trust `current_turn`.** The server remembers the turn
-   (a relay, no game logic) and returns it on join/sync, so turn survives a
-   reconnect. Don't derive whose turn it is locally.
-3. **Authority checkpoints with `setState`.** The host (`playerIds[0]`) calls
-   `Usion.game.setState(state)` (≤64 KB) at meaningful transitions; rejoining
-   clients restore instantly from the join ack / `onSync` instead of replaying.
-4. **Handle connection lifecycle.** `onDisconnect`/`onReconnect` (yourself) and
-   `onPlayerConnection` (peers: `connected` / `reconnecting` during the ~15s
-   grace / `gone`) — pause input and show a "reconnecting" indicator.
+Use `action()` and `onAction` instead of the realtime loop:
 
 ```javascript
-await Usion.game.action('move', { cell: 4 }, { nextTurn: opponentId });
-Usion.game.onAction((m) => {            // applied here, after the echo
-  applyMove(m.player_id, m.action_data, m.sequence);
-  if (m.current_turn) setActiveTurn(m.current_turn);
-});
-Usion.game.onSync((d) => rebuildFrom(d.actions, d.game_state, d.current_turn));
-if (isHost) Usion.game.setState(boardSnapshot);   // checkpoint after each move
-
-// Optional: let a move "save and send when you're back" instead of failing offline.
-await Usion.game.action('move', { cell: 4 }, { nextTurn: opponentId, queueOffline: true });
-Usion.game.onPlayerConnection((p) => {
-  if (p.state === 'reconnecting') pauseFor(p.player_id);
-  if (p.state === 'gone') declareWinByForfeit();
-});
+await Usion.game.action('move', { cell: 4 });   // sequenced, stored
+Usion.game.onAction((m) => applyMove(m.player_id, m.action_data, m.sequence));
+Usion.game.onSync((d) => rebuildFrom(d.actions, d.game_state)); // reconnect recovery
 ```
 
 ## Smoother netcode (when 20 Hz state-blasting isn't enough)
