@@ -1,7 +1,7 @@
 # Usion SDK — full API reference
 
 Source of truth: `packages/sdk/src/modules/*.js` and `packages/sdk/types/index.d.ts`
-(npm `@usions/sdk`, version in `packages/sdk/package.json` — 2.13.x at time of
+(npm `@usions/sdk`, version in `packages/sdk/package.json` — 2.14.0 at time of
 writing). The browser bundle is served at `https://usions.com/usion-sdk.js`.
 If anything here disagrees with the source, the source wins.
 
@@ -168,7 +168,11 @@ Usion.game.connectDirect({roomId?, serviceId?, apiUrl?, token?})  // force direc
 ### Sending
 
 ```javascript
-Usion.game.action(type, data?)    // Promise<{success, sequence?}> — sequenced + stored; turn-based moves
+Usion.game.action(type, data?, opts?)  // Promise<{success, sequence?}> — sequenced + stored; turn-based moves
+//   opts.nextTurn:     player ID whose turn is next — server remembers it and hands it to
+//                      (re)joining clients as current_turn, so turn state survives reconnects
+//   opts.queueOffline: hold the move while disconnected and send it (in order) on reconnect
+//                      (turn-based only — never for realtime, which would replay stale inputs)
 Usion.game.realtime(type, data?)  // fire-and-forget — per-frame state, positions, effects
 Usion.game.requestSync(lastSeq?)  // ask server for full state → onSync
 Usion.game.requestRematch()
@@ -190,15 +194,30 @@ Usion.game.onGameRestarted(d)  // rematch; sequence resets to 0
 Usion.game.onRematchRequest(d)
 Usion.game.onError(d)          // d.message, d.code?
 Usion.game.onDisconnect(reason) / onReconnect(attempt) / onConnectionError(err)
+Usion.game.onPlayerConnection(d)  // a peer's connection state changed (transient drop/recover)
 ```
+
+Each `onX(cb)` keeps a SINGLE handler (last registration wins) but returns an
+unsubscribe function. For multiple listeners on the same event use
+`Usion.game.on(event, cb)` — it supports any number of listeners, can be called
+BEFORE `connect()`, works in every transport, and returns an unsubscribe
+function. It accepts the internal name (`'action'`), the wire name
+(`'game:action'`), or snake_case (`'player_joined'`).
 
 ### State persistence (iframe remount recovery)
 
 ```javascript
-Usion.game.saveState(state)  // localStorage keyed by player+room → boolean
+Usion.game.saveState(state)  // localStorage keyed by player+room → boolean (device-local)
 Usion.game.loadState()       // T|null
 Usion.game.clearState()
 Usion.game.debug(payload)    // host overlay when page has ?debug=1
+
+// Server-side authoritative checkpoint (host / playerIds[0] only, ≤64 KB).
+// Distinct from saveState (which is device-local localStorage): the checkpoint
+// is sent to every client that joins/rejoins as `game_state` in the join ack
+// and in game:sync, so reconnect recovery becomes "load checkpoint + replay the
+// tail" instead of replaying every action from zero.
+Usion.game.setState(state)   // Promise<{success, error?, code?}>; no-op in direct mode
 ```
 
 ### Netcode helpers (also under `Usion.netcode.*`)
@@ -331,6 +350,8 @@ Usion.exit({backCount?})             // close the mini-app
 Usion.error(message)
 Usion.log(msg)
 Usion.on(type, cb)                   // custom postMessage events from host (NOT socket events)
+Usion.diagnostics()                  // {version, transport, connected, joined, roomId, playerId, lastSequence, ...}
+                                     //   live SDK snapshot — also auto-attached to game.debug payloads
 Usion.getTheme()                     // 'light'|'dark'
 Usion.getLanguage()                  // e.g. 'en', 'mn'
 Usion.claimBackButton(cb) / Usion.releaseBackButton()

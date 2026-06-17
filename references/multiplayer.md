@@ -60,7 +60,11 @@ Rules:
   `realtime()` = fire-and-forget, use for per-frame state (positions, effects).
 - Handle disconnects: `onPlayerLeft` → forfeit win; `onDisconnect`/`onReconnect`
   → pause + `Usion.game.requestSync()` on recovery.
-- Persist across iframe remounts with `Usion.game.saveState/loadState`.
+- Persist across iframe remounts with `Usion.game.saveState/loadState` (device-local).
+- For server-side recovery, the host can checkpoint authoritative state with
+  `Usion.game.setState(state)` (≤64 KB) — (re)joining clients receive it as
+  `game_state` in the join ack and in `game:sync`, so recovery is "load
+  checkpoint + replay tail" instead of replaying every action.
 
 ## Turn-based pattern
 
