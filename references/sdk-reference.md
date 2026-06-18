@@ -326,6 +326,11 @@ Usion.notify.setMuted(muted)               // user opt-out for this app
 Usion.notify.isMuted()                     // Promise<boolean>
 ```
 
+- **The notification title is ALWAYS your mini-app's name** — so the user can
+  tell which app pinged them (every mini-app shares the Usion app identity).
+  Your `title` becomes the message headline and `body` the detail; both render in
+  the notification body (banner and OS push alike). Don't put your app name in
+  `title` — put the actual message there.
 - `path` deep-links into your app — a safe **relative** path (`/render/abc`);
   read it back on launch via `Usion.getLaunchParams().path`.
 - **Scope:** you can only notify the **current** user — never fan out to others.

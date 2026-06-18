@@ -87,7 +87,7 @@ Quick map of what the platform offers (full signatures in the SDK reference):
 - **Multiplayer**: `Usion.game.connect/join/action/realtime` + `on*` handlers; netcode helpers (interpolation, prediction, delta snapshots, lockstep, WebRTC mesh, WebTransport)
 - **Social**: `Usion.lobby.*` (parties + codes), `Usion.matchmaking.find/cancel/onMatch`, `Usion.leaderboard.submit/top/friends/me`
 - **Chat integration**: `Usion.chat.sendMessage/createPersonalChat`, `Usion.bot.*` for inline bot widgets
-- **Notifications**: `Usion.notify.send({title, body, path?})` notifies the app's own user (in-app banner online / OS push offline); tapping reopens the app at `path` (read via `Usion.getLaunchParams().path`). `setMuted`/`isMuted` for opt-out. Server-triggered: signed `POST /services/{id}/notify`
+- **Notifications**: `Usion.notify.send({title, body, path?})` notifies the app's own user (in-app banner online / OS push offline); tapping reopens the app at `path` (read via `Usion.getLaunchParams().path`). The notification's **title is always your mini-app's name** — your `title`/`body` become the message; don't repeat the app name in `title`. `setMuted`/`isMuted` for opt-out. Server-triggered: signed `POST /services/{id}/notify`
 - **Results & sharing**: `Usion.saveResult`, `Usion.share`, `Usion.shareToFeed`, `Usion.download`
 - **Lifecycle/UI**: `Usion.exit()`, `Usion.claimBackButton(cb)`, `Usion.setLoading`, `Usion.toggle`, theme/language getters
 
