@@ -1,9 +1,15 @@
 # Usion SDK — full API reference
 
 Source of truth: `packages/sdk/src/modules/*.js` and `packages/sdk/types/index.d.ts`
-(npm `@usions/sdk`, version in `packages/sdk/package.json` — 2.14.0 at time of
+(npm `@usions/sdk`, version in `packages/sdk/package.json` — 2.16.0 at time of
 writing). The browser bundle is served at `https://usions.com/usion-sdk.js`.
 If anything here disagrees with the source, the source wins.
+
+> **Chat-list surfacing is automatic (SDK ≥ 2.15).** Your app appears in the
+> user's chat list only after they *actually interact* with it — the first real
+> tap/click/key/touch — not when it merely opens. The SDK detects this for you
+> (an internal one-time `USER_INTERACTION` beacon); you don't need to call
+> anything, and automatic load-time SDK calls never count as engagement.
 
 ## Contents
 
@@ -174,9 +180,25 @@ Usion.game.action(type, data?, opts?)  // Promise<{success, sequence?}> — sequ
 //   opts.queueOffline: hold the move while disconnected and send it (in order) on reconnect
 //                      (turn-based only — never for realtime, which would replay stale inputs)
 Usion.game.realtime(type, data?)  // fire-and-forget — per-frame state, positions, effects
-Usion.game.requestSync(lastSeq?)  // ask server for full state → onSync
+Usion.game.requestSync(lastSeq?)  // ask server for full state → onSync (auto-called on reconnect)
 Usion.game.requestRematch()
 Usion.game.forfeit()              // Promise<{success}>
+Usion.game.getLastSequence()        // highest action sequence seen (SDK ≥ 2.16)
+Usion.game.getLastAppliedSequence() // highest applied locally; trails while catching up (≥ 2.16)
+```
+
+### Reconnect-safe shared state (SDK ≥ 2.16)
+
+```javascript
+// Authoritative state that SURVIVES a disconnect — built on action()+setState().
+// Host (player_ids[0]) auto-checkpoints; (re)joining clients recover automatically.
+const s = Usion.game.syncedState(initial, {
+  reduce: (state, a) => nextState,  // a = {playerId, type, data, sequence}; default shallow-merges data
+  checkpointEvery: 1,               // host setState() cadence (1 = exact recovery); 'authority': 'host'|'all'
+});
+s.get();                  // current state      s.onChange(cb)        s.isAuthority()
+s.commit(data) / s.commit(type, data, opts);    // sequenced + applied once; recovers on rejoin
+s.checkpoint();           // force a server checkpoint (authority only; no-op in direct mode)
 ```
 
 ### Handlers
@@ -195,6 +217,10 @@ Usion.game.onRematchRequest(d)
 Usion.game.onError(d)          // d.message, d.code?
 Usion.game.onDisconnect(reason) / onReconnect(attempt) / onConnectionError(err)
 Usion.game.onPlayerConnection(d)  // a peer's connection state changed (transient drop/recover)
+// SDK ≥ 2.16 — unified reconnection lifecycle (use these for the "Reconnecting…" UX):
+Usion.game.onConnectionState(s)   // 'connected'|'disconnected'|'rejoining'|'reconnected'; same on all transports
+Usion.game.getConnectionState()   // current state, synchronously
+Usion.game.onReconnected(info)    // once after a reconnect's re-sync: info.{state, lastSequence, viaSync}
 ```
 
 Each `onX(cb)` keeps a SINGLE handler (last registration wins) but returns an
@@ -313,6 +339,29 @@ Tapping it opens the chat. No setup needed — it fires automatically on send.
 Personal 1-on-1 messages stay end-to-end encrypted, so their pushes show the sender
 name but a generic body ("Sent you a message"), never decrypted content.
 
+## Permissions
+
+Ask the user before using a capability — the same way you ask for money. The host
+shows a modal; the user **allows or cancels**. The user can later change any grant
+in the Usion app's settings for your app. SDK ≥ 2.17. First permission:
+`notifications`. Backend: per-user-per-service grants in `service_permissions`.
+
+```javascript
+Usion.permissions.request(['notifications'], { reason? })  // Promise<{granted, permissions}>
+Usion.permissions.query(['notifications'])                 // Promise<{notifications:boolean}>  (no prompt)
+Usion.permissions.has('notifications')                     // Promise<boolean>
+```
+
+- **Ask before you act.** Capabilities are enforced by the platform, not by your
+  return value — e.g. `notify.send` is dropped (`delivered:'blocked'`) until the
+  user grants `notifications`. Pattern: `request` first, then use the capability.
+- **`granted`** is true only if EVERY requested permission ended granted;
+  **`permissions`** is the per-key result map.
+- **You can't grant yourself.** The trusted host writes the grant, never the
+  iframe — `request` just shows the modal.
+- **Embedded feature.** Standalone (outside the Usion app) there's no modal;
+  `request`/`query` resolve "not granted" and the user manages grants in-app.
+
 ## Notify
 
 Let your app notify ITS OWN user — even when they aren't looking at it. Delivery
@@ -321,6 +370,8 @@ OS push when they're offline or the app is backgrounded. Tapping reopens your ap
 (at `path`, if given). SDK ≥ 2.13. Backend: `backend/realtime/notify_handlers.py`.
 
 ```javascript
+// REQUIRED once before sending — without a grant, send() returns delivered:'blocked'.
+await Usion.permissions.request(['notifications']);
 Usion.notify.send({ title, body, path? })  // Promise<{success, delivered}>
 Usion.notify.setMuted(muted)               // user opt-out for this app
 Usion.notify.isMuted()                     // Promise<boolean>

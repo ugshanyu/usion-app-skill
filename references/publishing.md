@@ -92,10 +92,21 @@ Body    {"user_id": "...", "title": "...", "body": "...", "path": "/optional/in-
 ```
 
 - **Auth:** HMAC-SHA256 over the exact raw request body, keyed by the service's
-  `realtime.signing.shared_secret` (≥ 16 chars). Mint/rotate it yourself via
-  `POST /registry/services/my/{id}/notify-secret` (returns the secret once; see
-  Path C) or set it in a seed script. `403` if no secret is configured, `401` on
-  signature mismatch.
+  `realtime.signing.shared_secret` (≥ 16 chars). `403` if no secret is
+  configured, `401` on signature mismatch.
+- **Where the secret comes from** — it is **revealed exactly once** and is
+  write-only thereafter (every read excludes it), so store it in your backend's
+  env (e.g. `USION_NOTIFY_SECRET`) when you get it. Three ways to obtain one:
+  - **Creator path** (`usk_live_…` key): auto-minted when you register via
+    `POST /services` (returned once as `signing_secret`); the AI Creator publish
+    flow mints one too. Lost it? Rotate (owner-only):
+    `POST /services/{id}/signing-secret/rotate` → fresh `signing_secret`, old one
+    dies immediately.
+  - **Mobile-user path** (`usion_sk_…` token, Service Creator UI): mint/rotate via
+    `POST /registry/services/my/{id}/notify-secret` (returns the secret once; see
+    Path C).
+  - **Seed script** (`KLING_NOTIFY_SECRET` → `seed_*.py`) for first-party
+    services that set it explicitly.
 - **Scope/limits:** identical to `Usion.notify` — only that service's user,
   ≤ 20/hour per user, title/body/path sanitized + capped, muted users dropped.
 - Online users get an in-app banner; offline users get an OS push that reopens
