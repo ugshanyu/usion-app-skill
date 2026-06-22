@@ -86,6 +86,7 @@ Quick map of what the platform offers (full signatures in the SDK reference):
 - **Device-local storage** (per user, per app): `Usion.storage.get/set/remove/clear/keys` (512 KB/value) and `Usion.fileStorage` for base64 blobs
 - **Cloud KV** (server-persisted, cross-device): `Usion.cloud.get/set/remove/keys` + shared per-app bucket `Usion.cloud.shared.*` with atomic `shared.incr` — 64 KB/value, 200 keys & 1 MB/bucket, 60 ops/min
 - **Multiplayer**: `Usion.game.connect/join/action/realtime` + `on*` handlers; netcode helpers (interpolation, prediction, delta snapshots, lockstep, WebRTC mesh, WebTransport)
+- **Launch mode**: `Usion.getLaunchParams().mode` is `'single'` (opened from Explore / the Game hub, solo) or `'multiplayer'` (opened from a chat game invite); `Usion.game.isMultiplayer()` is the boolean. Branch your setup on it — don't infer mode from `roomId`, the host declares it. (SDK ≥ 2.18)
 - **Social**: `Usion.lobby.*` (parties + codes), `Usion.matchmaking.find/cancel/onMatch`, `Usion.leaderboard.submit/top/friends/me`
 - **Chat integration**: `Usion.chat.sendMessage/createPersonalChat`, `Usion.bot.*` for inline bot widgets
 - **Permissions**: `Usion.permissions.request(['notifications'])` shows a host modal (allow/cancel); `query`/`has` read state without prompting. Capabilities are platform-enforced — **ask before you act**. Users manage grants later in app settings. First permission: `notifications`. (SDK ≥ 2.17)

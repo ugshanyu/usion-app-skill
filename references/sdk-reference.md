@@ -30,13 +30,21 @@ If anything here disagrees with the source, the source wins.
 Usion.init(callback)   // callback(config) — fires once config arrives from host
 Usion.version          // SDK version string
 Usion.config           // read-only current config
-Usion.getLaunchParams() // {path, ref, roomId} — how the host opened this app
+Usion.getLaunchParams() // {path, ref, roomId, mode} — how the host opened this app
 ```
 
 `config` fields: `userId, userName, userAvatar, authToken, sessionId,
 sessionData, balance, results, theme ('light'|'dark'), language, socketUrl,
 webTransportUrl, roomId, playerIds, serviceId, serviceName, apiUrl,
-connectionMode ('platform'|'direct'), launchPath, ref`.
+connectionMode ('platform'|'direct'), launchPath, ref, mode`.
+
+**Single vs multiplayer (SDK ≥ 2.18):** `Usion.getLaunchParams().mode` is
+`'single'` (opened from Explore / the Game hub, played solo) or `'multiplayer'`
+(opened from a game invite in a chat). The host declares it authoritatively —
+branch on it to skip lobby/matchmaking UI in single-player or wire up netcode in
+multiplayer. `Usion.game.isMultiplayer()` is the boolean shortcut. Don't infer
+mode from `roomId` yourself: a single-player game may still get an auto-created
+room, so trust `mode`.
 
 **Deep-linking:** when the user taps a notification carrying a `path`, the app
 reopens and `Usion.getLaunchParams().path` returns that path. Read it in your
@@ -168,6 +176,7 @@ await Usion.game.join(config.roomId)  // → {room_id, player_id, sequence?}
 Usion.game.leave()
 Usion.game.disconnect()
 Usion.game.isConnected()              // boolean
+Usion.game.isMultiplayer()            // boolean — launched from a chat invite vs solo from Explore (SDK ≥ 2.18)
 Usion.game.connectDirect({roomId?, serviceId?, apiUrl?, token?})  // force direct-mode WS
 ```
 

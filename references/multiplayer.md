@@ -6,6 +6,13 @@ Never rebuild lobbies, ready screens, room codes, or wager pickers.
 
 ## The contract
 
+0. **Know your mode (SDK ≥ 2.18).** `Usion.getLaunchParams().mode` is
+   `'multiplayer'` when opened from a chat game invite, `'single'` when opened
+   solo from Explore / the Game hub (`Usion.game.isMultiplayer()` is the
+   boolean). A game that supports both should branch on it — run the
+   host-authoritative flow below only when multiplayer; play locally when
+   single. The host sets `mode` authoritatively, so trust it rather than
+   inferring from `roomId` (a single-player game may still get an auto room).
 1. The game opens with `config.roomId` and `config.playerIds` already set by
    the platform (from an invite or matchmaking).
 2. `await Usion.game.connect()` → `await Usion.game.join(config.roomId)`.
