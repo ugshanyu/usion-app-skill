@@ -192,6 +192,11 @@ Usion.game.realtime(type, data?)  // fire-and-forget — per-frame state, positi
 Usion.game.requestSync(lastSeq?)  // ask server for full state → onSync (auto-called on reconnect)
 Usion.game.requestRematch()
 Usion.game.forfeit()              // Promise<{success}>
+Usion.game.invite(opts?)          // open host friend/group picker → fill your room (SDK ≥ 2.19)
+//   Promise<{success, roomId, invited[]}>. Recent chats + username search + your groups,
+//   multi-select; each pick gets a game-invite card; tappers join THIS room → onPlayerJoined.
+//   Works even if launched solo: the host makes a room with you as host and joins you to it.
+//   opts.maxPlayers caps the room; selection is capped at remaining seats. Embedded-only.
 Usion.game.getLastSequence()        // highest action sequence seen (SDK ≥ 2.16)
 Usion.game.getLastAppliedSequence() // highest applied locally; trails while catching up (≥ 2.16)
 ```

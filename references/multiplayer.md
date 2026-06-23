@@ -20,6 +20,15 @@ Never rebuild lobbies, ready screens, room codes, or wager pickers.
    handlers before or immediately after joining.
 4. **`config.playerIds[0]` is the host** — the single authority.
 
+**Invite friends from inside the game (SDK ≥ 2.19).** Call
+`await Usion.game.invite()` to open the host's friend/group picker (recent chats
++ username search + your groups, multi-select). Everyone picked gets a game-invite
+card in their chat; anyone who taps it joins THIS room and your `onPlayerJoined`
+fires. It works even if the game was launched solo — the host creates a room with
+the caller as host and `invite()` joins them to it — so register `onPlayerJoined`
+before/right after calling it. Capacity is bounded by the game's `max_players`.
+Don't build your own invite/share UI; this is the platform's.
+
 The publish pipeline detects multiplayer from the built code: it must contain
 `Usion.game.join` + `realtime`/`action` + `onPlayerJoined`/`onRealtime` calls,
 or the service won't get the `multiplayer` tag and realtime config, and the
