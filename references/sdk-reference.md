@@ -1,7 +1,7 @@
 # Usion SDK — full API reference
 
 Source of truth: `packages/sdk/src/modules/*.js` and `packages/sdk/types/index.d.ts`
-(npm `@usions/sdk`, version in `packages/sdk/package.json` — 2.16.0 at time of
+(npm `@usions/sdk`, version in `packages/sdk/package.json` — 2.22.0 at time of
 writing). The browser bundle is served at `https://usions.com/usion-sdk.js`.
 If anything here disagrees with the source, the source wins.
 
@@ -22,12 +22,17 @@ If anything here disagrees with the source, the source wins.
 7. [Results, sharing, misc root methods](#results-sharing-misc)
 8. [UI utilities](#ui-utilities)
 9. [Backend channel & allowlist](#backend-channel)
-10. [APIs that DO NOT exist](#apis-that-do-not-exist)
+10. [Error model](#error-model-sdk--222)
+11. [APIs that DO NOT exist](#apis-that-do-not-exist)
 
 ## Lifecycle & config
 
 ```javascript
 Usion.init(callback)   // callback(config) — fires once config arrives from host
+Usion.init()           // ALSO returns Promise<config> (SDK ≥ 2.22): await Usion.init()
+Usion.init({timeout: 8000})  // rejects UsionError(INIT_TIMEOUT) if the host never
+                             // sends INIT (embedded but host silent) — no more
+                             // hanging forever; a late INIT still fires the callback
 Usion.version          // SDK version string
 Usion.config           // read-only current config
 Usion.getLaunchParams() // {path, ref, roomId, mode} — how the host opened this app
@@ -44,7 +49,10 @@ connectionMode ('platform'|'direct'), launchPath, ref, mode`.
 branch on it to skip lobby/matchmaking UI in single-player or wire up netcode in
 multiplayer. `Usion.game.isMultiplayer()` is the boolean shortcut. Don't infer
 mode from `roomId` yourself: a single-player game may still get an auto-created
-room, so trust `mode`.
+room, so trust `mode`. A `'single'` launch can be PROMOTED into a multiplayer
+room after launch when the user taps the host's Share button — see
+`Usion.game.onRoomAssigned` (SDK ≥ 2.20): `roomId`/`mode` update and the SDK
+auto-joins. So register multiplayer handlers up front even in `'single'`.
 
 **Deep-linking:** when the user taps a notification carrying a `path`, the app
 reopens and `Usion.getLaunchParams().path` returns that path. Read it in your
@@ -79,6 +87,7 @@ Credits only — never move money any other way.
 
 ```javascript
 Usion.wallet.getBalance()                       // Promise<number> (cached, refreshed on BALANCE_UPDATE)
+Usion.wallet.getBalance({fresh: true})          // bypass the cache — after server-side settles/refunds
 Usion.wallet.hasCredits(amount)                 // Promise<boolean>
 Usion.wallet.requestPayment(amount, reason, opts?)
 // → Promise<{success, newBalance?, receiptToken?, transactionId?}>
@@ -197,11 +206,21 @@ Usion.game.invite(opts?)          // open host friend/group picker → fill your
 //   multi-select; each pick gets a game-invite card; tappers join THIS room → onPlayerJoined.
 //   Works even if launched solo: the host makes a room with you as host and joins you to it.
 //   opts.maxPlayers caps the room; selection is capped at remaining seats. Embedded-only.
-Usion.game.getLastSequence()        // highest action sequence seen (SDK ≥ 2.16)
-Usion.game.getLastAppliedSequence() // highest applied locally; trails while catching up (≥ 2.16)
+Usion.game.getLastSequence()        // highest action sequence seen (SDK ≥ 2.21)
+Usion.game.getLastAppliedSequence() // highest applied locally; trails while catching up (≥ 2.21)
+Usion.game.setState(state)          // checkpoint authoritative state server-side (≤ 64 KB)
+//   Sequence-versioned (SDK ≥ 2.22): the SDK sends the action sequence the state
+//   reflects; the server REJECTS older checkpoints → resolves
+//   {success:false, code:'STALE_STATE'}. Recover by resyncing, don't retry blindly.
 ```
 
-### Reconnect-safe shared state (SDK ≥ 2.16)
+**Self-healing sends (SDK ≥ 2.22):** if the server reports the socket isn't in
+the room (`NOT_IN_ROOM` — a reconnected-but-detached socket), the SDK
+auto-rejoins + resyncs and retries the action once. `realtime()` failures are
+no longer silent either — they ack a coded error surfaced via `onError`
+(`{code, message, source: 'realtime'}`).
+
+### Reconnect-safe shared state (SDK ≥ 2.21)
 
 ```javascript
 // Authoritative state that SURVIVES a disconnect — built on action()+setState().
@@ -213,6 +232,7 @@ const s = Usion.game.syncedState(initial, {
 s.get();                  // current state      s.onChange(cb)        s.isAuthority()
 s.commit(data) / s.commit(type, data, opts);    // sequenced + applied once; recovers on rejoin
 s.checkpoint();           // force a server checkpoint (authority only; no-op in direct mode)
+s.getSequence();          // sequence of the last action applied      s.destroy() // detach
 ```
 
 ### Handlers
@@ -221,6 +241,7 @@ s.checkpoint();           // force a server checkpoint (authority only; no-op in
 Usion.game.onJoined(d)         // local join confirmed
 Usion.game.onPlayerJoined(d)   // d.player_id, d.player_ids (full updated roster)
 Usion.game.onPlayerLeft(d)     // d.player_id
+Usion.game.onRoomAssigned(d)   // d.roomId — host promoted a SOLO launch into a room (SDK ≥ 2.20)
 Usion.game.onStateUpdate(d)    // d.game_state, d.current_turn, d.sequence
 Usion.game.onSync(d)           // d.actions[], d.game_state, d.sequence
 Usion.game.onAction(m)         // m.player_id, m.action_type, m.action_data, m.sequence
@@ -228,10 +249,10 @@ Usion.game.onRealtime(m)       // m.player_id, m.action_type, m.action_data
 Usion.game.onGameFinished(d)   // d.winner_ids[], d.reason?, d.forfeiter?
 Usion.game.onGameRestarted(d)  // rematch; sequence resets to 0
 Usion.game.onRematchRequest(d)
-Usion.game.onError(d)          // d.message, d.code?
+Usion.game.onError(d)          // d.message, d.code (stable ERROR_CODES value), d.source?
 Usion.game.onDisconnect(reason) / onReconnect(attempt) / onConnectionError(err)
 Usion.game.onPlayerConnection(d)  // a peer's connection state changed (transient drop/recover)
-// SDK ≥ 2.16 — unified reconnection lifecycle (use these for the "Reconnecting…" UX):
+// SDK ≥ 2.21 — unified reconnection lifecycle (use these for the "Reconnecting…" UX):
 Usion.game.onConnectionState(s)   // 'connected'|'disconnected'|'rejoining'|'reconnected'; same on all transports
 Usion.game.getConnectionState()   // current state, synchronously
 Usion.game.onReconnected(info)    // once after a reconnect's re-sync: info.{state, lastSequence, viaSync}
@@ -244,6 +265,29 @@ BEFORE `connect()`, works in every transport, and returns an unsubscribe
 function. It accepts the internal name (`'action'`), the wire name
 (`'game:action'`), or snake_case (`'player_joined'`).
 
+### Solo → host promotion (SDK ≥ 2.20)
+
+A game opened SOLO (launch `mode: 'single'`, from Explore / the Game hub) can be
+promoted into a live multiplayer room AFTER launch — when the user taps the
+host's top-bar **Share** button and sends an invite. The host posts the new room
+into the iframe and the SDK handles the rest:
+
+```javascript
+Usion.game.onRoomAssigned((d) => {
+  // d.roomId — the SDK has ALREADY set getLaunchParams().roomId + .mode = 'multiplayer'
+  // and is connect()+join()ing this room for you. onJoined fires right after.
+  flipToMultiplayerView();   // swap the solo view for the hosting/multiplayer view
+});
+```
+
+When this fires, the caller becomes the host (`playerIds[0]`) and invitees join
+the SAME room. Because any multiplayer-capable game can be promoted mid-session,
+register your multiplayer handlers (`onPlayerJoined`, `onAction`/`onRealtime`,
+`onJoined`) UP FRONT — don't gate them behind `isMultiplayer()`/`mode` at launch.
+`getLaunchParams().mode` stays `'single'` as the LAUNCH value, but `roomId`
+becomes set once promoted. Don't build your own Share/invite UI — the host owns
+it (see `Usion.game.invite()` and the multiplayer reference).
+
 ### State persistence (iframe remount recovery)
 
 ```javascript
@@ -252,7 +296,7 @@ Usion.game.loadState()       // T|null
 Usion.game.clearState()
 Usion.game.debug(payload)    // host overlay when page has ?debug=1
 
-// Server-side authoritative checkpoint (host / playerIds[0] only, ≤64 KB).
+// Server-side authoritative checkpoint (any participant may call, not host-only, ≤64 KB).
 // Distinct from saveState (which is device-local localStorage): the checkpoint
 // is sent to every client that joins/rejoins as `game_state` in the join ack
 // and in game:sync, so reconnect recovery becomes "load checkpoint + replay the
@@ -306,7 +350,11 @@ Usion.lobby.onUpdate(cb) / onStarted(cb)  // cb({room_id, by, player_ids?})
 Queue with strangers (`mm:*`).
 
 ```javascript
-Usion.matchmaking.find(serviceId?, {size?})  // Promise<{roomId, players[]}> — size default 2
+Usion.matchmaking.find(serviceId?, {size?, timeout?})  // Promise<{roomId, players[]}> — size default 2
+//   timeout (ms, SDK ≥ 2.22): bound the wait — on expiry the SDK leaves the
+//   queue and rejects UsionError(MATCH_TIMEOUT). Without it, find() stays
+//   pending until matched or cancel()led. A newer find() rejects the previous
+//   one with SUPERSEDED; cancel() rejects with CANCELLED.
 Usion.matchmaking.cancel()
 Usion.matchmaking.onMatch(cb)
 ```
@@ -419,7 +467,7 @@ Usion.submit(data)                   // finish with results; host closes the app
 Usion.exit({backCount?})             // close the mini-app
 Usion.error(message)
 Usion.log(msg)
-Usion.on(type, cb)                   // custom postMessage events from host (NOT socket events)
+Usion.on(type, cb)                   // custom postMessage events from host (NOT socket events); returns unsubscribe fn
 Usion.diagnostics()                  // {version, transport, connected, joined, roomId, playerId, lastSequence, ...}
                                      //   live SDK snapshot — also auto-attached to game.debug payloads
 Usion.getTheme()                     // 'light'|'dark'
@@ -441,13 +489,41 @@ Design tokens: `https://usions.com/usion-design-system.css`.
 ## Backend channel
 
 `Usion._backendEmit(event, data)` routes through the app's own socket
-(standalone) or the host's authenticated socket (embedded). Embedded mode only
+(standalone) or the host's authenticated socket (embedded). Standalone apps
+don't need to call `Usion.game.connect()` first — the first cloud /
+leaderboard / notify / lobby / matchmaking call connects automatically
+(SDK ≥ 2.22). Embedded mode only
 allows these prefixes: **`lobby:*`, `mm:*`, `lb:*`, `kv:*`, `notify:*`**. A new prefix
 requires editing `BACKEND_EMIT_ALLOWED` in BOTH
 `web/app/(main)/chat/iframe/[id]/game-handlers.ts` and
 `mobile/features/iframe/message-handler.ts`, plus a backend
 `register_*_handlers()` in `backend/realtime/` — and the mobile allowlist only
 ships with the next EAS app release. Don't add prefixes casually.
+
+## Error model (SDK ≥ 2.22)
+
+Every SDK rejection is a **`UsionError`** with a stable machine-readable
+`err.code` — branch on the code, NEVER on message text (messages may change
+between releases; codes may not). The backend sends the code in every failure
+ack; old backends fall back to message matching automatically.
+
+```javascript
+try {
+  await Usion.cloud.set('save', bigBlob);
+} catch (err) {
+  if (err.code === 'VALUE_TOO_LARGE') { /* shrink the payload */ }
+  if (err.code === 'RATE_LIMITED') { setTimeout(retry, err.retryAfter * 1000); }
+}
+```
+
+Codes: `NOT_CONNECTED, NO_ROOM, ROOM_NOT_FOUND, NOT_PARTICIPANT, NOT_IN_ROOM,
+NOT_AUTHORITY, NOT_AUTHENTICATED, JOIN_TIMEOUT, CONNECT_TIMEOUT, INIT_TIMEOUT,
+MATCH_TIMEOUT, STATE_TOO_LARGE, INVALID_STATE, STALE_STATE, INVALID_NEXT_TURN,
+INVALID_INPUT, NOT_FOUND, QUOTA_EXCEEDED, VALUE_TOO_LARGE, LOBBY_FULL,
+LOBBY_CLOSED, CONFLICT, RATE_LIMITED, REQUEST_TIMEOUT, QUEUE_FULL, CANCELLED,
+SUPERSEDED, UNSUPPORTED, UNKNOWN`. `RATE_LIMITED` carries `err.retryAfter`
+(seconds until the window resets). You rarely need to HANDLE `NOT_IN_ROOM` —
+the SDK auto-rejoins and retries the action for you.
 
 ## APIs that DO NOT exist
 

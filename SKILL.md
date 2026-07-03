@@ -66,12 +66,18 @@ builds flagged/rejected):
   `Usion.user.getId()/getName()/getAvatar()`, `Usion.game.action()/realtime()`.
 - A multiplayer game MUST call `Usion.game.connect()` then
   `Usion.game.join(config.roomId)` and register `onPlayerJoined` / `onRealtime`
-  (or `onAction`) handlers.
+  (or `onAction`) handlers — register these UP FRONT, even on a `'single'`
+  launch, since the host can promote a solo game to multiplayer mid-session
+  (handle `Usion.game.onRoomAssigned`; see Step 4).
 - Money moves only through `Usion.wallet.requestPayment(amount, reason)` —
   never invent custom payment flows.
-- Do NOT build lobbies, ready screens, room codes, invite UIs, or wager
+- Do NOT build room codes, invite/share UIs, matchmaking UIs, or wager
   pickers — the platform owns those (rooms, matchmaking, `game_invite` chat
   flow). Your game receives `config.roomId` and `config.playerIds` already set.
+  An in-game **waiting room / ready screen** IS allowed (optional): while
+  invited players trickle into the room a game MAY show who's present with a
+  ready toggle and a host-start (see the multiplayer reference). A simple duel
+  should still just start the moment everyone in `config.playerIds` has joined.
 
 Design: mobile-first, small embedded frame, Vercel-inspired minimalism
 (black/white, flat, generous whitespace). Respect `Usion.getTheme()` and
@@ -88,7 +94,7 @@ Quick map of what the platform offers (full signatures in the SDK reference):
 - **Multiplayer**: `Usion.game.connect/join/action/realtime` + `on*` handlers; netcode helpers (interpolation, prediction, delta snapshots, lockstep, WebRTC mesh, WebTransport)
 - **Launch mode**: `Usion.getLaunchParams().mode` is `'single'` (opened from Explore / the Game hub, solo) or `'multiplayer'` (opened from a chat game invite); `Usion.game.isMultiplayer()` is the boolean. Branch your setup on it — don't infer mode from `roomId`, the host declares it. (SDK ≥ 2.18)
 - **Social**: `Usion.lobby.*` (parties + codes), `Usion.matchmaking.find/cancel/onMatch`, `Usion.leaderboard.submit/top/friends/me`
-- **Invite friends**: `Usion.game.invite()` opens the host's friend/group picker (recent + username search + groups, multi-select) and fills your room — tappers join THIS room and you get `onPlayerJoined`. Works even when launched solo (host makes a room, joins you as host). Don't build your own invite UI. (SDK ≥ 2.19)
+- **Invite friends**: `Usion.game.invite()` opens the host's friend/group picker (recent + username search + groups, multi-select) and fills your room — tappers join THIS room and you get `onPlayerJoined`. Works even when launched solo (host makes a room, joins you as host). The host ALSO shows a top-bar **Share** button on every game (same picker) — using it promotes a solo launch into a room and fires `Usion.game.onRoomAssigned`. Don't build your own invite/Share UI. (SDK ≥ 2.20)
 - **Chat integration**: `Usion.chat.sendMessage/createPersonalChat`, `Usion.bot.*` for inline bot widgets
 - **Permissions**: `Usion.permissions.request(['notifications'])` shows a host modal (allow/cancel); `query`/`has` read state without prompting. Capabilities are platform-enforced — **ask before you act**. Users manage grants later in app settings. First permission: `notifications`. (SDK ≥ 2.17)
 - **Notifications**: `Usion.notify.send({title, body, path?})` notifies the app's own user (in-app banner online / OS push offline); tapping reopens the app at `path` (read via `Usion.getLaunchParams().path`). **Call `Usion.permissions.request(['notifications'])` first** — without a grant, `send` returns `delivered:'blocked'` (existing/already-published apps are grandfathered). The notification's **title is always your mini-app's name** — your `title`/`body` become the message; don't repeat the app name in `title`. `setMuted`/`isMuted` for opt-out. Server-triggered: signed `POST /services/{id}/notify`
@@ -106,6 +112,14 @@ Read [references/multiplayer.md](references/multiplayer.md). The core contract:
 
 - The platform relays via Socket.IO; **`config.playerIds[0]` is the host** and
   the single source of truth (host-authoritative pattern).
+- **Register multiplayer handlers up front.** Wire `onPlayerJoined`, `onJoined`,
+  and `onAction`/`onRealtime` regardless of launch mode — even when
+  `getLaunchParams().mode === 'single'`. A solo-launched game can be promoted to
+  host mid-session when the user taps the host's Share button: handle
+  `Usion.game.onRoomAssigned` (SDK ≥ 2.20) to flip from the solo view into the
+  hosting view (the SDK has already set `roomId`/`mode` and auto-joined;
+  `onJoined` fires right after). Don't gate multiplayer setup behind
+  `isMultiplayer()`/`mode` at launch.
 - Host steps the simulation and broadcasts state with
   `Usion.game.realtime('state', {...})`; guests send inputs with
   `Usion.game.realtime('input', {...})`; host decides the winner and announces

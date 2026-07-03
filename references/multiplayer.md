@@ -2,7 +2,19 @@
 
 The platform owns rooms, matchmaking, invites (`game_invite` chat flow), and
 the transport. Your game owns the rules, the simulation, and the rendering.
-Never rebuild lobbies, ready screens, room codes, or wager pickers.
+Never rebuild room codes, invite/share UIs, matchmaking UIs, or wager pickers.
+
+An in-game **waiting room (lobby) is allowed** — optional, and in-room only:
+while the invited players trickle into `config.roomId` a game MAY show who's
+present, a ready toggle, and a host-start button. The reference pattern (from
+the «13» card game): keep a `presentIds` set + `ready` map fed by
+`onPlayerJoined`/`onPlayerLeft` and a `player_info` realtime broadcast; order
+seats by the `config.playerIds` roster; when the HOST starts, it locks the seat
+order into its first stored `action` (the deal/start), so every client — and
+every reconnect — derives identical seating. What a lobby must never do:
+create/switch rooms, draw invite/share affordances (the host's Share button and
+`Usion.game.invite()` own that), or gate a simple 2-player duel that should
+just start when both players have joined.
 
 ## The contract
 
@@ -16,9 +28,33 @@ Never rebuild lobbies, ready screens, room codes, or wager pickers.
 1. The game opens with `config.roomId` and `config.playerIds` already set by
    the platform (from an invite or matchmaking).
 2. `await Usion.game.connect()` → `await Usion.game.join(config.roomId)`.
-3. Register `onPlayerJoined`, `onPlayerLeft`, and `onRealtime`/`onAction`
-   handlers before or immediately after joining.
+3. **Register `onPlayerJoined`, `onPlayerLeft`, `onJoined`, and
+   `onRealtime`/`onAction` handlers UP FRONT** — before or immediately after
+   joining, and *even when the launch `mode === 'single'`*. Don't gate
+   multiplayer setup behind `isMultiplayer()`/`mode`: a solo launch can be
+   promoted to host mid-session (see "Solo → host promotion" below).
 4. **`config.playerIds[0]` is the host** — the single authority.
+
+**Solo → host promotion (SDK ≥ 2.20).** A game launched solo (`mode: 'single'`,
+from Explore) can become a live multiplayer room AFTER launch — when the user
+taps the host's top-bar **Share** button and sends an invite. The host posts the
+room into the iframe and the SDK updates `getLaunchParams().roomId` + `.mode`
+(now `'multiplayer'`), then auto-`connect()`+`join()`s it; the caller becomes the
+host (`playerIds[0]`). Handle it by flipping your solo view into the
+hosting/multiplayer view:
+
+```javascript
+Usion.game.onRoomAssigned(({ roomId }) => {
+  // SDK already updated mode/roomId and is joining; onJoined fires right after.
+  startMultiplayer();   // swap solo UI → hosting UI; you are playerIds[0]
+});
+```
+
+Because of this, a multiplayer-capable game must NOT branch its whole setup on
+`mode` at launch — register the multiplayer handlers regardless, and use
+`onRoomAssigned`/`onJoined` to switch from the solo view into the hosting view.
+`getLaunchParams().mode` stays `'single'` as the LAUNCH value; only `roomId`
+flips once promoted.
 
 **Invite friends from inside the game (SDK ≥ 2.19).** Call
 `await Usion.game.invite()` to open the host's friend/group picker (recent chats
@@ -28,6 +64,13 @@ fires. It works even if the game was launched solo — the host creates a room w
 the caller as host and `invite()` joins them to it — so register `onPlayerJoined`
 before/right after calling it. Capacity is bounded by the game's `max_players`.
 Don't build your own invite/share UI; this is the platform's.
+
+The host ALSO surfaces a top-bar **Share** button on every game (same picker),
+which is how a solo launch gets promoted — the user shares from there and your
+game receives `onRoomAssigned` (above). So whether the invite originates from
+`Usion.game.invite()` or the host's Share button, the platform owns it; never
+draw your own Share/invite affordance. (A Call button appears in that same
+top-bar slot only while in a call with invited players.)
 
 The publish pipeline detects multiplayer from the built code: it must contain
 `Usion.game.join` + `realtime`/`action` + `onPlayerJoined`/`onRealtime` calls,
@@ -74,13 +117,16 @@ Rules:
   self-reported score, especially for paid outcomes.
 - `action()` = sequenced + stored, use for turn-based moves (chess, tic-tac-toe).
   `realtime()` = fire-and-forget, use for per-frame state (positions, effects).
-- Handle disconnects: `onPlayerLeft` → forfeit win; `onDisconnect`/`onReconnect`
-  → pause + `Usion.game.requestSync()` on recovery.
+- Handle disconnects per the "Reconnect contract" section below: pause on
+  `onDisconnect`, resume on `onReconnected`; `onPlayerLeft` → forfeit win.
 - Persist across iframe remounts with `Usion.game.saveState/loadState` (device-local).
-- For server-side recovery, the host can checkpoint authoritative state with
-  `Usion.game.setState(state)` (≤64 KB) — (re)joining clients receive it as
+- For server-side recovery, any participant can checkpoint authoritative state
+  with `Usion.game.setState(state)` (≤64 KB; not host-only — keeps the snapshot
+  fresh even while the host is backgrounded) — (re)joining clients receive it as
   `game_state` in the join ack and in `game:sync`, so recovery is "load
   checkpoint + replay tail" instead of replaying every action.
+- Failures are never silent (SDK ≥ 2.22): every error has a stable `err.code`,
+  and `realtime()` errors surface via `onError`.
 
 ## Turn-based pattern
 
@@ -91,6 +137,61 @@ await Usion.game.action('move', { cell: 4 });   // sequenced, stored
 Usion.game.onAction((m) => applyMove(m.player_id, m.action_data, m.sequence));
 Usion.game.onSync((d) => rebuildFrom(d.actions, d.game_state)); // reconnect recovery
 ```
+
+## Reconnect contract (what the platform does on every disconnect)
+
+Every session disconnects at least once (backgrounded app, network handoff).
+The SDK handles recovery; your job is to stay idempotent and gate input:
+
+- **Auto-recovery.** On reconnect the SDK rejoins the room and resyncs from the
+  last seen sequence. Actions sent during that window **queue until rejoin +
+  sync completes** — a stale move can't go out first. If the server reports a
+  detached socket (`NOT_IN_ROOM` on action/realtime), the SDK auto-rejoins,
+  resyncs, and retries the move once. You never call reconnect yourself.
+- **Exactly-once actions.** Every `action()` is echoed with an authoritative
+  `sequence`; the SDK dedupes, so `onAction` sees each move exactly once even
+  across echoes and reconnect replays. Apply moves ONLY in `onAction`.
+- **Connection-state machine (SDK ≥ 2.21).** `Usion.game.onConnectionState(cb)`
+  (`connected → disconnected → rejoining → reconnected → connected`) drives the
+  "Reconnecting…" overlay + input lock; `getConnectionState()` reads it
+  synchronously. `onReconnected(cb)` fires once per reconnect AFTER the resync,
+  with `{ state, lastSequence, viaSync }` — restore local state there.
+- **Checkpoints are CAS-versioned (SDK ≥ 2.22).** `setState` carries the
+  sequence it reflects; an older checkpoint is rejected with
+  `{success:false, code:'STALE_STATE'}` → you are behind: call
+  `Usion.game.requestSync()`, never retry the write.
+- **`Usion.game.syncedState(initial, opts)` (SDK ≥ 2.21) is the recommended
+  reconnect-safe shared state**: commits are sequenced actions applied through
+  your pure `reduce` on every client in the same order; the authority
+  (`player_ids[0]` by default) auto-checkpoints, and rejoiners recover
+  automatically (checkpoint + tail replay + gap-fill). Use it before
+  hand-rolling `setState`/`onSync` recovery.
+
+  ```javascript
+  const match = Usion.game.syncedState({ tally: {} }, {
+    reduce: (s, a) => a.type === 'point'
+      ? { tally: { ...s.tally, [a.playerId]: (s.tally[a.playerId] || 0) + 1 } }
+      : s,
+  });
+  match.onChange((s) => renderScore(s.tally));
+  match.commit('point', {});   // applied exactly once, on every client
+  ```
+- **Offline queue (turn-based ONLY).** `action(type, data, { queueOffline: true })`
+  holds a move while disconnected and flushes in order after rejoin+sync. Cap
+  20 (then rejects `QUEUE_FULL`). Never queue realtime inputs.
+- **Peers see states, not verdicts.** `onPlayerConnection` reports
+  `'reconnecting'` (grace window ~15 s — NOT a forfeit), then `'connected'` or
+  `'gone'`. Only end the match on `'gone'`/`onPlayerLeft`. `game:player_left`
+  carries `player_ids` — the authoritative remaining roster, mirroring
+  `player_joined` — so reconcile membership from either event.
+- **Foreground catch-up is automatic.** A backgrounded tab can miss actions
+  without any disconnect; on return to visibility the SDK requests a sync
+  (on mobile the host app drives it on foreground). Resyncs are deduped, so
+  keep your `onSync` handler idempotent (restore-then-replay guarded by
+  sequence).
+- **No host migration today.** If the host (`player_ids[0]`) goes `'gone'`,
+  nobody is promoted — end the match gracefully (settle result, offer exit)
+  instead of leaving a frozen game.
 
 ## Smoother netcode (when 20 Hz state-blasting isn't enough)
 
