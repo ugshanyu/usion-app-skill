@@ -160,5 +160,10 @@ calls `Usion.game.join` will not get multiplayer rails.
   simulation. Live: https://pong-webrtc-production.up.railway.app
 - `microservices/block-stack/server.js` — host-authoritative `RoomRuntime`
   game loop, up to 8 players.
+- `ugshanyu/tilt-royale` (standalone repo) — the most complete **direct-mode**
+  reference: 2–4p server-authoritative tilt battle royale on Railway Singapore,
+  60 Hz sim / 20 Hz delta snapshots, SDK `createPredictor` + `createInterpolation`
+  + server-side lag compensation, shared pure-physics module. Its README is a
+  direct-mode + netcode tutorial. Live: https://tilt-royale-production.up.railway.app
 - Full catalog of live apps with URLs: see
   [references/publishing.md](references/publishing.md).

@@ -239,5 +239,9 @@ platform validates but doesn't relay. Reference implementations:
 `microservices/pong/server.js` (WebRTC + WS fallback, `RoomRuntime`),
 `microservices/block-stack/server.js` (host-authoritative tick loop, 8 players),
 `microservices/space-craft-v2/` (4-player server-authoritative shooter with lag
-compensation). Registered with `realtime.connection_mode: "direct"` in their
-seed scripts.
+compensation), and **`ugshanyu/tilt-royale`** (2–4p tilt battle royale — the
+only direct-mode reference kept as a standalone public repo, NOT in the
+monorepo; its README is a full direct-mode + netcode tutorial and it shows the
+clean split of a shared pure-physics module imported by both the server sim and
+the client `createPredictor`). Registered with
+`realtime.connection_mode: "direct"` in their seed scripts.

@@ -148,6 +148,7 @@ Other production deployments:
 | XO 8×8 | https://usion-xo-platform.vercel.app | https://github.com/ugshanyu/usion-xo-platform · seed `backend/scripts/seed_xo8x8.py` |
 | Pong (WebRTC) | https://pong-webrtc-production.up.railway.app | https://github.com/ugshanyu/usion-pong-webrtc · `microservices/pong/` — DataChannel + WS fallback |
 | Space Craft v2 | https://space-craft-v2-production.up.railway.app | https://github.com/ugshanyu/space-craft-v2 — 4-player server-authoritative |
+| **Tilt Royale** (direct-mode reference) | https://tilt-royale-production.up.railway.app | https://github.com/ugshanyu/tilt-royale · seed `backend/scripts/seed_tilt_royale.py` — 2–4p server-authoritative tilt battle royale on Railway Singapore; the most complete example of the SDK netcode helpers (`createPredictor` + `createInterpolation`) + server-side lag compensation, with a shared pure-physics module so client prediction stays bit-identical to the server sim. Read its README as a direct-mode tutorial. |
 | Contra P2P | https://contra-p2p-production.up.railway.app | https://github.com/ugshanyu/usion-contra-p2p — browser-to-browser WebRTC |
 | Voiceify TTS | https://voiceify-tts.vercel.app | `microservices/voiceify-tts/` (monorepo) |
 | Kling/MongolGPT Studio | https://kling-studio.vercel.app | https://github.com/ugshanyu/mongolgpt-studio (private) · `microservices/kling-studio/` |
