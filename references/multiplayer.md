@@ -245,3 +245,29 @@ monorepo; its README is a full direct-mode + netcode tutorial and it shows the
 clean split of a shared pure-physics module imported by both the server sim and
 the client `createPredictor`). Registered with
 `realtime.connection_mode: "direct"` in their seed scripts.
+
+### Direct-mode netcode pitfalls (each of these shipped broken once — don't repeat them)
+
+- **Never let a unicast frame consume the broadcast seq counter.** If your
+  server numbers snapshots (`s`) and clients treat a gap as "resync needed",
+  then join/rejoin/resync keyframes sent to ONE client must REUSE the current
+  seq, not advance it — otherwise every unicast manufactures a gap for every
+  OTHER client, whose resync request burns another seq, ping-ponging forever:
+  remote players freeze between keyframes and jump. (Tilt Royale v1 bug;
+  regression-pinned in its `test/seq.test.js`.)
+- **Only stateful streams should stall on a seq gap.** If players/projectiles
+  are full state on every frame, keep applying them through a gap and stall
+  only delta-patched collections (e.g. dot membership) until a keyframe.
+  Throttle resync requests (each one costs a full keyframe).
+- **Don't extrapolate angles linearly.** The SDK interpolation blends angles
+  on the shortest arc but extrapolates them linearly, so an underrun across
+  the ±π wrap projects a huge fake angular velocity (arrows whip-spin).
+  Interpolate `vx vy` instead and derive facing from velocity client-side.
+- **Don't gate `connect()` on a rendered frame.** Phaser (and any RAF-driven
+  engine) never ticks in a hidden/backgrounded WebView — if boot awaits the
+  scene before connecting, the game silently never connects. Connect and
+  scene-boot concurrently; let the scene render whatever state exists when it
+  wakes.
+- Mobile WebViews fire `visibilitychange` constantly (app switcher, keyboard,
+  notification shade). If each foreground triggers a resync request, make the
+  server skip the keyframe for clients that are already up to date.
