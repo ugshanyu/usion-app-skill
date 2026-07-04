@@ -271,3 +271,20 @@ the client `createPredictor`). Registered with
 - Mobile WebViews fire `visibilitychange` constantly (app switcher, keyboard,
   notification shade). If each foreground triggers a resync request, make the
   server skip the keyframe for clients that are already up to date.
+- **Never construct the render engine while the WebView is 0×0.** Hosts show a
+  loading state before revealing the iframe; Phaser (or any canvas engine)
+  booted at that moment creates a 0×0 buffer and RESIZE never recovers — the
+  canvas stays black for the whole match while data flows perfectly. Wait for
+  a non-zero viewport before creating the game (gate ONLY the scene, never the
+  connection) and drive scale from a `ResizeObserver` on the mount div —
+  embedded WebViews don't reliably fire window `resize` when the host reveals
+  the iframe. A render watchdog (frames counted per update; on-screen banner
+  when zero) is what made this diagnosable remotely.
+- **Send something downstream while a room idles.** Direct servers that only
+  emit during rounds go silent in 'waiting'; proxy edges (Railway included)
+  kill silently-downstream connections after ~60 s → waiting clients
+  reconnect-loop, re-minting access tokens forever. Reply to heartbeats.
+- **Gate dev conveniences on env flags AND verify in prod.** A bot-fill helper
+  whose flag existed but was never checked hijacked real 2-player rooms: the
+  bot filled the lone waiting player's room, the round auto-started, and the
+  invited opponent arrived into a live round as a spectator.
