@@ -165,5 +165,13 @@ calls `Usion.game.join` will not get multiplayer rails.
   60 Hz sim / 20 Hz delta snapshots, SDK `createPredictor` + `createInterpolation`
   + server-side lag compensation, shared pure-physics module. Its README is a
   direct-mode + netcode tutorial. Live: https://tilt-royale-production.up.railway.app
+- `ugshanyu/tank` (standalone repo) — **direct-mode with a custom BINARY
+  protocol** (not the SDK's JSON realtime channel): 2–8p tilt-to-drive /
+  touch-to-shoot arena. Mints the access token via
+  `Usion.game._fetchDirectAccess`, then opens its own binary WebSocket (11-byte
+  inputs, quantized snapshots) to a Railway server that validates the RS256 token
+  against the platform JWKS. Shared deterministic sim → prediction + reconciliation
+  + interpolation. Use it when you want maximum wire efficiency + your own
+  transport. Live: https://tank-production-5873.up.railway.app
 - Full catalog of live apps with URLs: see
   [references/publishing.md](references/publishing.md).
