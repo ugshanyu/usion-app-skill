@@ -156,6 +156,7 @@ Other production deployments:
 | Video Editor | https://video-editor-bay.vercel.app | `microservices/video-editor/` |
 | Random Chat | https://random-chat-production-31c3.up.railway.app | `microservices/random-chat/` |
 | UsionFlow mini-app | https://app.mongolgpt.mn/miniapp | `backend/scripts/seed_usionflow_miniapp.py` |
+| **Quiz Party** | https://quiz-party-production.up.railway.app | https://github.com/ugshanyu/usion-quiz-party · seed `backend/scripts/seed_quiz_party.py` — quiz platform registered as a SERVICE (no game tags) that still runs live multiplayer over the platform relay: rooms/lobby work because the seed persists `game_config` + `realtime` directly (room APIs never re-check tags). Kahoot-style host-authoritative sessions via sequenced `action()`s + `realtime()` answers, `Usion.lobby` join codes, scoped-token auth via `/iframe/verify-token`, and service-scoped iframe tokens on the room REST APIs. |
 
 SDK + design system:
 
