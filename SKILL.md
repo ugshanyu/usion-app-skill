@@ -24,6 +24,7 @@ global object: `window.Usion`.
 |------|--------------|
 | [references/sdk-reference.md](references/sdk-reference.md) | You need the exact API surface — any `Usion.*` method, its signature, quotas, or callback shape |
 | [references/multiplayer.md](references/multiplayer.md) | The app is a multiplayer game — room lifecycle, host-authoritative pattern, netcode helpers |
+| [references/game-engines.md](references/game-engines.md) | The app is a real 2D/3D game — the blessed platform-hosted engine runtimes (Phaser 4; Babylon.js + Havok with its ready-made `PhysicsCharacterController`), the exact allowed `<script>` tags, and engine-specific multiplayer wiring |
 | [references/publishing.md](references/publishing.md) | You're deploying/registering the app — hosting paths, service registry, and links to live deployed exemplar apps |
 | [references/agent-api.md](references/agent-api.md) | You're an AI agent registering/managing services via the REST API with a creator API key — auth, `POST /services`, capturing the one-time signing secret, rotating it |
 
@@ -33,7 +34,10 @@ There are two ways an app reaches users. Pick one first; it changes everything
 about structure and deploy.
 
 **Path A — Static bundle (AI-Creator style).** One self-contained `index.html`
-(CSS + JS inlined, no build step, no external CDNs). Hosted on S3 by the
+(CSS + JS inlined, no build step, no external CDNs — the ONLY exception is the
+platform-hosted engine runtimes under `https://usions.com/vendor/`, see
+[references/game-engines.md](references/game-engines.md); other external
+scripts are stripped at deploy). Hosted on S3 by the
 platform; the platform **injects** `<script src="https://usions.com/usion-sdk.js"></script>`
 into the `<head>` at deploy — do NOT include the SDK script tag yourself, just
 assume `window.Usion` exists. This is the right path for most apps and games.
@@ -91,7 +95,7 @@ Quick map of what the platform offers (full signatures in the SDK reference):
 - **Money**: `Usion.wallet.getBalance/hasCredits/requestPayment/onBalanceChange`
 - **Device-local storage** (per user, per app): `Usion.storage.get/set/remove/clear/keys` (512 KB/value) and `Usion.fileStorage` for base64 blobs
 - **Cloud KV** (server-persisted, cross-device): `Usion.cloud.get/set/remove/keys` + shared per-app bucket `Usion.cloud.shared.*` with atomic `shared.incr` — 64 KB/value, 200 keys & 1 MB/bucket, 60 ops/min
-- **Multiplayer**: `Usion.game.connect/join/action/realtime` + `on*` handlers; netcode helpers (interpolation, prediction, delta snapshots, lockstep, WebRTC mesh, WebTransport)
+- **Multiplayer**: `Usion.game.connect/join/action/realtime` + `on*` handlers; netcode helpers (interpolation, prediction, delta snapshots, lockstep, WebRTC mesh, WebTransport, `Usion.netcode.createInterestGrid` AOI spatial hash). World rooms (SDK ≥ 2.23): tag `world` + `Usion.game.joinWorld()` for drop-in/drop-out rooms with backfill — up to 200 players direct/hosted, 32 on the platform relay; hosted mode (`realtime.connection_mode: "hosted"` + a one-file server bundle the platform runs) — see the multiplayer reference
 - **Launch mode**: `Usion.getLaunchParams().mode` is `'single'` (opened from Explore / the Game hub, solo) or `'multiplayer'` (opened from a chat game invite); `Usion.game.isMultiplayer()` is the boolean. Branch your setup on it — don't infer mode from `roomId`, the host declares it. (SDK ≥ 2.18)
 - **Social**: `Usion.lobby.*` (parties + codes), `Usion.matchmaking.find/cancel/onMatch`, `Usion.leaderboard.submit/top/friends/me`
 - **Invite friends**: `Usion.game.invite()` opens the host's friend/group picker (recent + username search + groups, multi-select) and fills your room — tappers join THIS room and you get `onPlayerJoined`. Works even when launched solo (host makes a room, joins you as host). The host ALSO shows a top-bar **Share** button on every game (same picker) — using it promotes a solo launch into a room and fires `Usion.game.onRoomAssigned`. Don't build your own invite/Share UI. (SDK ≥ 2.20)
@@ -173,5 +177,13 @@ calls `Usion.game.join` will not get multiplayer rails.
   against the platform JWKS. Shared deterministic sim → prediction + reconciliation
   + interpolation. Use it when you want maximum wire efficiency + your own
   transport. Live: https://tank-production-5873.up.railway.app
+- `microservices/orbs-hosted` + `microservices/orbs-direct` — the **massive
+  multiplayer twins** (SDK ≥ 2.23): the same agar.io-lite world game (200
+  players, drop-in/drop-out, AOI) implemented BOTH ways. `orbs-hosted` is the
+  hosted-mode reference (server.bundle.js on the platform rooms runtime —
+  you write rules, the platform runs tick/AOI/auth); `orbs-direct` is the
+  developer-hosted reference (own Node server: JWKS auth, 30 Hz sim / 15 Hz
+  AOI snapshots, seq discipline, keepalives). Diff the two to see exactly
+  what hosted mode does for you. Not yet deployed — in-repo reference.
 - Full catalog of live apps with URLs: see
   [references/publishing.md](references/publishing.md).

@@ -79,6 +79,28 @@ real login session — an API token cannot mint more API tokens (no escalation).
 
 E2E test: `cd backend && python -m scripts.test_api_tokens`.
 
+## Hosted game servers (`connection_mode: "hosted"` — platform runs your server)
+
+Instead of operating direct-mode infrastructure yourself (Path B on Railway),
+ship ONE server bundle file and let the platform rooms runtime execute it —
+bundle contract and runtime guarantees in `references/multiplayer.md` "Hosted
+rooms". Registration works through any path above (seed script or Path C API):
+
+- `realtime: { connection_mode: "hosted", server_bundle_url: "https://…/server.js" }`.
+  `server_bundle_url` is REQUIRED: https with a publicly reachable host
+  (localhost/private IPs rejected outside dev). The runtime fetches it (512 KB
+  cap) and runs it sandboxed.
+- **Do NOT set `realtime.ws_url`** — hosted services get their ws endpoint
+  from the platform, and a developer-supplied `ws_url` is rejected with 422.
+  Clients receive the platform-assigned endpoint through the room access API
+  automatically when they call `Usion.game.connectDirect()` (503 until ops has
+  pointed `ROOMS_RUNTIME_WS_URL` at the runtime fleet).
+- **World rooms:** add tag `world` (alongside `game`, `multiplayer`) for
+  drop-in/drop-out rooms with backfill instead of fixed match rosters.
+  `max_players` is clamped per transport at registration: ≤ 200 for
+  direct/hosted, ≤ 32 for platform relay (relay fan-out is O(N²)); default 100
+  with the `world` tag.
+
 ## Server-triggered notifications (your backend → a Usion user)
 
 When a job finishes while the app is closed (e.g. a video render), your own

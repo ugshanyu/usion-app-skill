@@ -192,6 +192,16 @@ The SDK handles recovery; your job is to stay idempotent and gate input:
 - **No host migration today.** If the host (`player_ids[0]`) goes `'gone'`,
   nobody is promoted — end the match gracefully (settle result, offer exit)
   instead of leaving a frozen game.
+- **Direct sockets self-heal too (SDK ≥ 2.24).** A liveness watchdog probes
+  after 4 s of inbound silence and force-closes a dead direct socket at 12 s
+  (`onDisconnect` fires with reason `'liveness_timeout'`), so a silent
+  network drop recovers in seconds instead of waiting out a TCP timeout;
+  reconnects reuse the still-valid access token (one WS dial), and input
+  frames are held latest-only under send-buffer backpressure so recovery
+  never bursts stale inputs. Your game still just handles
+  `onDisconnect`/`onReconnect` — nothing new to wire. For a connection
+  indicator use `Usion.game.getNetworkStats()` /
+  `Usion.game.onNetworkQuality(cb)` instead of hand-rolled ping loops.
 
 ## Smoother netcode (when 20 Hz state-blasting isn't enough)
 
@@ -288,3 +298,120 @@ the client `createPredictor`). Registered with
   whose flag existed but was never checked hijacked real 2-player rooms: the
   bot filled the lone waiting player's room, the round auto-started, and the
   invited opponent arrived into a live round as a spectator.
+
+## World rooms — massive multiplayer (SDK ≥ 2.23)
+
+A **world room** runs continuously: players drop in and out at any time instead
+of playing fixed matches. A service opts in with the `world` tag (alongside
+`game`, `multiplayer`). Capacity: up to **200 players** for direct/hosted
+services, **32** for platform relay (relay fan-out is O(N²)); default 100,
+clamped to the transport's cap at registration.
+
+Client flow — one new call, then everything works exactly as today:
+
+```javascript
+const { roomId, playerIds } = await Usion.game.joinWorld();  // or ({ serviceId })
+await Usion.game.connect();      // platform relay: connect() + join(roomId)…
+await Usion.game.join(roomId);   // …or Usion.game.connectDirect() for direct/hosted
+```
+
+- `joinWorld()` rides the `mm:*` channel (works embedded AND standalone).
+  Placement order: the world you're already in → atomic backfill into a world
+  with space → a fresh world. Sets `game.roomId`; rejects `MATCH_TIMEOUT`
+  after 15 s.
+- **`WORLD_FULL`** (stable code): `join()` on a world at `max_players` rejects
+  with it. World rooms auto-admit non-members while there's space — the space
+  check and roster append are one atomic update, so seats can't oversell.
+- **Leaving frees the seat** for backfill: `leave()`, a heartbeat timeout
+  (stale players are auto-pruned), and `forfeit()` all just remove the player —
+  peers get `game:player_left` with the updated `player_ids` roster.
+  **Forfeit == leave in a world**: no winners, no `game:finished` fan-out; the
+  world keeps playing without the quitter.
+- World rooms are born `status: "playing"` (`min_players: 1`) — never wait for
+  a full roster; render whoever is in `player_ids` and expect constant churn.
+
+### AOI for developer-run world servers (direct mode)
+
+At world scale never broadcast full state to everyone — send each player only
+what they can see. `Usion.netcode.createInterestGrid` is pure JS (no
+DOM/window) and runs in your Node server:
+
+```javascript
+const grid = Usion.netcode.createInterestGrid({ cellSize: 256 }); // ≈ query radius
+// each tick:
+for (const e of Object.values(entities)) grid.upsert(e.id, e.x, e.y);
+for (const p of players) {
+  const { entered, left, visible } = grid.observe(p.id, p.x, p.y, 600);
+  sendTo(p, { spawn: entered, despawn: left, state: slice(visible) });
+}
+grid.remove(deadId);        // entity despawned
+grid.dropObserver(p.id);    // player left — free their tracking state
+```
+
+`observe()` is diffed per observer (`entered`/`left` since its previous call);
+`query(x, y, radius)` is the stateless variant. Both are true circle tests.
+
+### Hosted rooms (platform runs your server)
+
+Register with `realtime.connection_mode: "hosted"` + `server_bundle_url`
+(https; `ws_url` is platform-assigned — never set it; see
+`references/publishing.md`). You ship ONE JS file; the platform rooms runtime
+executes it in a sandbox and serves clients over the SDK direct-mode wire
+protocol — to `Usion.game.connectDirect()` a hosted room is indistinguishable
+from a server you run yourself.
+
+The bundle contract (single file, CommonJS exports):
+
+```javascript
+module.exports = {
+  config: { tickHz: 20, aoi: { radius: 600 } }, // tickHz 1–30 (default 20); aoi {radius, cellSize?} or false
+  init(room) {},                    // room booted (once)
+  onJoin(room, player) {},          // player {id, name} admitted
+  onLeave(room, player) {},         // left / disconnected / forfeited
+  onInput(room, player, input) {},  // input {type, data, channel: 'action'|'input'}
+  tick(room, dt) {},                // fixed timestep; dt in SECONDS (capped at 0.25)
+};
+```
+
+room API: `room.state` (your authoritative state; convention
+`state.entities[id] = {x, y, ...}` — entities with numeric `x`/`y` are
+AOI-sliced per observer, entities without positions are global),
+`room.players` (array of player ids), `room.now` (server epoch ms),
+`room.broadcast(type, data)` / `room.send(playerId, type, data)` (arrive at
+clients as `{seq, event: type, data}` via `onRealtime`), and `room.end(results)`
+(broadcasts `match_end`, stops the room).
+
+What the platform provides: the tick loop, per-observer AOI snapshots, RS256
+token auth, per-player input limits (≤ 60 messages/s, payload ≤ 8192 bytes),
+and a watchdog (every hook capped at 1 s; 3 consecutive over-budget ticks end
+the room with `server_overrun`, 5 consecutive tick throws with
+`server_error`). Hook exceptions are caught and logged — a throwing
+`onJoin`/`onInput` never crashes the room. The sandbox exposes JS intrinsics
+only: no `require`, `process`, filesystem, or network, and `room.state`
+crosses to the host as one JSON round-trip per tick — keep it
+JSON-serializable and lean. `Usion.game.action()` and `.realtime()` both land
+in `onInput` (`input.channel` tells them apart); a client `rematch` arrives as
+`onInput` with `{type: 'rematch'}`.
+
+The snapshot each client receives via `Usion.game.onRealtime`:
+
+```javascript
+{
+  seq: 1042,          // advances ONCE per tick; unicast keyframes REUSE the current seq
+  t: 1760000000000,   // server epoch ms
+  entities: { ... },  // full map (aoi off) or this observer's visible slice + globals
+  removed: ['dot_4'], // ids that left this observer's AOI or were deleted
+  events: [],         // reserved (always [] in v1)
+  you: 'user_9',      // only on per-observer (AOI) snapshots and keyframes
+  keyframe: true,     // only on join/resync keyframes — reset your local entity cache
+}
+```
+
+A `seq` gap therefore always means real missed ticks (the runtime already
+applies the unicast-keyframe seq rule from the pitfalls above). **`'idle'` and
+`'heartbeat'` are reserved event names**: the runtime sends
+`state_delta {event: 'idle'}` keepalives after 20 s of silence and acks client
+heartbeats with `{event: 'heartbeat'}` — ignore both in your client and never
+name your own events that. Hosted world state resets when a world empties
+(empty rooms are swept — v1 limitation), so persist anything durable in
+`Usion.cloud`.

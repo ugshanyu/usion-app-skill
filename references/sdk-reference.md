@@ -1,7 +1,7 @@
 # Usion SDK — full API reference
 
 Source of truth: `packages/sdk/src/modules/*.js` and `packages/sdk/types/index.d.ts`
-(npm `@usions/sdk`, version in `packages/sdk/package.json` — 2.22.0 at time of
+(npm `@usions/sdk`, version in `packages/sdk/package.json` — 2.24.0 at time of
 writing). The browser bundle is served at `https://usions.com/usion-sdk.js`.
 If anything here disagrees with the source, the source wins.
 
@@ -42,6 +42,32 @@ Usion.getLaunchParams() // {path, ref, roomId, mode} — how the host opened thi
 sessionData, balance, results, theme ('light'|'dark'), language, socketUrl,
 webTransportUrl, roomId, playerIds, serviceId, serviceName, apiUrl,
 connectionMode ('platform'|'direct'), launchPath, ref, mode`.
+
+### The auth token: scoped, late, and refreshed (read it LIVE)
+
+`config.authToken` is a **scoped iframe token** (JWT with `purpose: "iframe"`,
+bound to YOUR service id, ~60-min TTL) — never the user's full JWT. Three
+contracts every app with its own backend must follow:
+
+- **It can be absent at first INIT.** The host sends INIT immediately and mints
+  the token in parallel, so the first seconds of a session are legitimately
+  tokenless; the token arrives via a follow-up INIT (the SDK ≥ 2.24.1 merges it
+  into `Usion.config.authToken` / `Usion.user.getToken()` without re-firing your
+  init callback). Don't fire authenticated requests the instant init fires —
+  wait/spinner until the token exists, and on a 401 wait briefly for a fresh
+  token and retry once before showing an error.
+- **Read it per request, never cache the boot value.** The host re-mints and
+  re-INITs before the 60-min expiry; `Usion.config.authToken` and
+  `Usion.user.getToken()` always hold the current token. A copy taken at init
+  goes stale and turns into 401s an hour in.
+- **Your server verifies it with `POST {apiUrl}/iframe/verify-token`**, body
+  `{"token": "...", "expected_service_id": "<your service id>"}` →
+  `{user_id, name, avatar}`. Do NOT send it to `/auth/me` — user-facing
+  endpoints reject iframe-scoped tokens by design. Never trust a client-claimed
+  user id; verify server-side and cache briefly. Game-room REST endpoints
+  (`POST /games/rooms`, `/games/rooms/{id}/join`, `GET /games/rooms/{id}`,
+  matchmake) DO accept the scoped token — but only for rooms of your own
+  service.
 
 **Single vs multiplayer (SDK ≥ 2.18):** `Usion.getLaunchParams().mode` is
 `'single'` (opened from Explore / the Game hub, played solo) or `'multiplayer'`
@@ -186,7 +212,21 @@ Usion.game.leave()
 Usion.game.disconnect()
 Usion.game.isConnected()              // boolean
 Usion.game.isMultiplayer()            // boolean — launched from a chat invite vs solo from Explore (SDK ≥ 2.18)
-Usion.game.connectDirect({roomId?, serviceId?, apiUrl?, token?})  // force direct-mode WS
+Usion.game.connectDirect({roomId?, serviceId?, apiUrl?, token?, liveness?, backpressureBytes?})  // force direct-mode WS
+//   Direct sockets self-heal (SDK ≥ 2.24): a liveness watchdog probes after 4 s of inbound
+//   silence and declares the connection dead at 12 s (reason 'liveness_timeout') so
+//   auto-reconnect starts in seconds, not at TCP timeout; reconnects reuse the cached access
+//   token while it has >30 s validity (single WS dial); realtime input frames are held
+//   latest-only when the send buffer backs up past 8 KB (control frames always send).
+//   Tune via liveness: {probeAfterMs?, deadAfterMs?} | false and backpressureBytes (0 = off).
+Usion.game.getNetworkStats()          // {transport, connectionState, quality, rtt, jitter, lastInboundAgeMs, bufferedAmount} (SDK ≥ 2.24)
+Usion.game.onNetworkQuality(cb)       // fires on quality TRANSITIONS: {quality: 'good'|'fair'|'poor'|'dead', prev, stats} — returns unsubscribe (SDK ≥ 2.24)
+await Usion.game.joinWorld({serviceId?})  // → {roomId, playerIds} — drop-in/drop-out WORLD placement (SDK ≥ 2.23)
+//   Services tagged `world`. Rides the mm channel (embedded AND standalone): returns the world
+//   you're already in, else backfills a world with space, else creates a fresh one. Sets
+//   game.roomId, so the usual connect()+join() (relay) or connectDirect() (direct/hosted) flow
+//   is unchanged afterwards. Rejects MATCH_TIMEOUT after 15 s; join() on a full world rejects
+//   WORLD_FULL (seats free on leave/prune — see references/multiplayer.md "World rooms").
 ```
 
 ### Sending
@@ -326,7 +366,32 @@ Usion.game.replica({channel?, interpolate?})            // client: receive + vie
 Usion.game.simulateNetwork({latencyMs?, jitterMs?, lossPct?, dupPct?} | null)
 Usion.game.ping()    // Promise<number|null> RTT ms
 Usion.game.getRtt()  // smoothed RTT
+Usion.game.createInterestGrid({cellSize?})  // spatial-hash AOI for world rooms (SDK ≥ 2.23) — below
 ```
+
+**Interest grid (SDK ≥ 2.23)** — the area-of-interest building block for world
+rooms: buckets entities into fixed-size cells so "who is near (x, y)?" costs a
+few cell lookups instead of an O(N) scan. Pure JS with no DOM/window
+references — the same helper runs in the browser and in a Node game server
+producing per-player snapshots.
+
+```javascript
+const grid = Usion.netcode.createInterestGrid({ cellSize: 256 });
+//   cellSize (world units) defaults to 256 — pick roughly the typical query
+//   radius so lookups touch ~4–9 cells. Ids: non-empty string | finite number.
+grid.upsert(id, x, y)     // insert or move an entity
+grid.remove(id)           // unknown ids are a no-op
+grid.query(x, y, radius)  // → ids within radius (true circle test, not just cell membership)
+grid.observe(observerId, x, y, radius)  // → {entered, left, visible} — like query(), but
+//   diffed against this observer's previous observe(): drive spawn/despawn from
+//   entered/left and per-tick snapshots from visible
+grid.dropObserver(observerId)  // free the observer's tracking state (call when a player leaves)
+grid.size()               // number of entities in the grid
+```
+
+Allocation notes: `observe()` swaps two persistent per-observer sets instead of
+reallocating (it runs per tick per observer); a query scans only the cells the
+circle's bounding box overlaps, then applies a per-entity circle test.
 
 ## Lobby
 
@@ -475,6 +540,27 @@ Usion.getLanguage()                  // e.g. 'en', 'mn'
 Usion.claimBackButton(cb) / Usion.releaseBackButton()
 ```
 
+### Back button: the claim is ONE-SHOT — re-claim per screen
+
+`Usion.claimBackButton(cb)` routes the HOST header's back button to your app —
+use it instead of drawing your own header. But the claim resets after a
+single press (host and SDK both), so **claiming once at boot gives you exactly
+one working back press**; after that the button silently closes your app. The
+correct pattern: re-claim on **every screen change** while an in-app "back"
+exists, and `releaseBackButton()` on your root screen so the host button
+becomes a plain close there:
+
+```javascript
+function showScreen(render, onBack) {
+  render();
+  if (onBack) Usion.claimBackButton(function handle() {
+    onBack();                       // navigates → next showScreen re-claims
+    if (currentScreenHasBack()) Usion.claimBackButton(handle); // safety net
+  });
+  else Usion.releaseBackButton();   // root screen: host shows ✕ (close)
+}
+```
+
 ## UI utilities
 
 ```javascript
@@ -517,7 +603,7 @@ try {
 ```
 
 Codes: `NOT_CONNECTED, NO_ROOM, ROOM_NOT_FOUND, NOT_PARTICIPANT, NOT_IN_ROOM,
-NOT_AUTHORITY, NOT_AUTHENTICATED, JOIN_TIMEOUT, CONNECT_TIMEOUT, INIT_TIMEOUT,
+WORLD_FULL, NOT_AUTHORITY, NOT_AUTHENTICATED, JOIN_TIMEOUT, CONNECT_TIMEOUT, INIT_TIMEOUT,
 MATCH_TIMEOUT, STATE_TOO_LARGE, INVALID_STATE, STALE_STATE, INVALID_NEXT_TURN,
 INVALID_INPUT, NOT_FOUND, QUOTA_EXCEEDED, VALUE_TOO_LARGE, LOBBY_FULL,
 LOBBY_CLOSED, CONFLICT, RATE_LIMITED, REQUEST_TIMEOUT, QUEUE_FULL, CANCELLED,
