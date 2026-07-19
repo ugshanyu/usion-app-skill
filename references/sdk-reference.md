@@ -431,7 +431,7 @@ Opt-in per service (`leaderboard.enabled: true` in service config; `lb:*`).
 ```javascript
 Usion.leaderboard.submit(score, metadata?)  // Promise<{success, score, best, rank, updated}>
 Usion.leaderboard.top({limit?})             // Promise<entries[]> — global, default 20
-Usion.leaderboard.friends({limit?})         // people you've messaged + you
+Usion.leaderboard.friends({limit?})         // your accepted friends + you
 Usion.leaderboard.me()                      // Promise<{score, rank, total}>
 // entry: {user_id, name?, avatar?, score, rank, is_me, metadata?}
 ```
