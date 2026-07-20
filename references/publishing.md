@@ -178,6 +178,7 @@ Other production deployments:
 | Video Editor | https://video-editor-bay.vercel.app | `microservices/video-editor/` |
 | Random Chat | https://random-chat-production-31c3.up.railway.app | `microservices/random-chat/` |
 | UsionFlow mini-app | https://app.mongolgpt.mn/miniapp | `backend/scripts/seed_usionflow_miniapp.py` |
+| **Flappy** (friends leaderboard reference) | https://usion-flappy.vercel.app | https://github.com/ugshanyu/usion-flappy · seed `backend/scripts/seed_flappy_bird.py` — single-player arcade game and the reference for `Usion.leaderboard`: submits on game over, shows accepted-friends records via `leaderboard.friends()`, and its seed sets `leaderboard: {enabled: true, order: "desc"}` on the service doc (the gate for the `lb:*` channel). Static single file on Vercel (Path B, loads the SDK itself). |
 | **Quiz Party** | https://quiz-party-production.up.railway.app | https://github.com/ugshanyu/usion-quiz-party · seed `backend/scripts/seed_quiz_party.py` — quiz platform registered as a SERVICE (no game tags) that still runs live multiplayer over the platform relay: rooms/lobby work because the seed persists `game_config` + `realtime` directly (room APIs never re-check tags). Kahoot-style host-authoritative sessions via sequenced `action()`s + `realtime()` answers, `Usion.lobby` join codes, scoped-token auth via `/iframe/verify-token`, and service-scoped iframe tokens on the room REST APIs. |
 
 SDK + design system:
