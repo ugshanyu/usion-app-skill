@@ -79,6 +79,38 @@ real login session — an API token cannot mint more API tokens (no escalation).
 
 E2E test: `cd backend && python -m scripts.test_api_tokens`.
 
+### Hybrid tabbed services (`tabs` — native chat + your app's tabs, SDK ≥ 2.25)
+
+A **bot** service that also serves a web app can register `tabs`: the host
+renders ONE screen with the platform's native bot chat as one tab and your
+app's pages (one persistent iframe/WebView) as the others. Requirements:
+`"bot"` in tags (chat rides your webhook + Bot API) **and** `iframe_url`
+(where the non-chat tabs load). SDK v2 only for now.
+
+```jsonc
+{
+  "name": "My Studio", "tags": ["bot"], "service_type": "bot",
+  "iframe_url": "https://studio.example.com",
+  "webhook_url": "https://studio.example.com/api/usion-bot",
+  "tabs": [
+    { "key": "chat",    "label": "Assistant" },                       // no path = the native chat tab (exactly one required)
+    { "key": "explore", "label": "Explore", "path": "/explore" },
+    { "key": "create",  "label": "Create",  "path": "/create" },
+    { "key": "results", "label": "Results", "path": "/results" }
+  ],
+  "default_tab": "chat"   // optional; must match a tab key
+}
+```
+
+Rules enforced at registration (422 otherwise): ≤ 5 tabs, unique
+`key`s (`[a-z0-9_-]{1,32}`), labels ≤ 24 chars, exactly one chat tab (no
+`path`), other paths are **relative** (`"/x"`, never absolute URLs or `//`).
+Update via `PUT /registry/services/my/{id}` — send a new `tabs` array to
+replace, `"tabs": []` to remove. In-app contract (`Usion.onHostNavigate`,
+`Usion.openChat({prefill})`, `Usion.reportPath`) is in
+`references/sdk-reference.md` → "Hybrid tabbed services".
+E2E test: `cd backend && python -m scripts.test_service_tabs`.
+
 ## Hosted game servers (`connection_mode: "hosted"` — platform runs your server)
 
 Instead of operating direct-mode infrastructure yourself (Path B on Railway),

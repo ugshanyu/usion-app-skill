@@ -20,10 +20,11 @@ If anything here disagrees with the source, the source wins.
 5. [Lobby](#lobby) · [Matchmaking](#matchmaking) · [Leaderboard](#leaderboard)
 6. [Chat](#chat) · [Bot](#bot)
 7. [Results, sharing, misc root methods](#results-sharing-misc)
-8. [UI utilities](#ui-utilities)
-9. [Backend channel & allowlist](#backend-channel)
-10. [Error model](#error-model-sdk--222)
-11. [APIs that DO NOT exist](#apis-that-do-not-exist)
+8. [Hybrid tabbed services](#hybrid-tabbed-services-sdk--225)
+9. [UI utilities](#ui-utilities)
+10. [Backend channel & allowlist](#backend-channel)
+11. [Error model](#error-model-sdk--222)
+12. [APIs that DO NOT exist](#apis-that-do-not-exist)
 
 ## Lifecycle & config
 
@@ -424,17 +425,55 @@ Usion.matchmaking.cancel()
 Usion.matchmaking.onMatch(cb)
 ```
 
-## Leaderboard
+## Leaderboard + records
 
-Opt-in per service (`leaderboard.enabled: true` in service config; `lb:*`).
+**If your game has a score, a high score, or a time — enable this.** It is the
+platform's built-in retention loop, and it's almost free: opt in on the service
+config and call `submit()` on game over. The platform does the rest.
+
+Service config (set at registration / publish):
+
+```json
+"leaderboard": { "enabled": true, "order": "desc", "max_score": 100000 }
+// order: "desc" = higher is better (default) · "asc" = lower is better (time trials, golf)
+// max_score (optional): scores beyond this still record but never fire record
+//   notifications — a plausibility guard against forged scores.
+```
 
 ```javascript
 Usion.leaderboard.submit(score, metadata?)  // Promise<{success, score, best, rank, updated}>
 Usion.leaderboard.top({limit?})             // Promise<entries[]> — global, default 20
-Usion.leaderboard.friends({limit?})         // your accepted friends + you
+Usion.leaderboard.friends({limit?})         // your accepted friends + you (powers Game Center)
 Usion.leaderboard.me()                      // Promise<{score, rank, total}>
 // entry: {user_id, name?, avatar?, score, rank, is_me, metadata?}
 ```
+
+**What you get for free once `leaderboard.enabled` + you `submit()`** — no extra
+code:
+
+- **Game Center**: your game shows up in the platform's records hub — every
+  player sees their best, their rank among friends, and their friends' records
+  for your game, with a tap-to-play button.
+- **"Friend beat your record" notifications**: when a player's new best
+  overtakes a friend's best, that friend automatically gets a
+  "«Name» beat your record on «YourGame»" message + push that opens your game.
+  This is the platform's virality loop — you write zero code for it; it's a
+  direct consequence of calling `submit()`.
+
+**Recommended pattern for a score-based game** (this is what the Flappy
+reference app does — see publishing.md):
+
+```javascript
+// on game over
+const r = await Usion.leaderboard.submit(score);   // best kept automatically
+showBest(r.best);
+const friends = await Usion.leaderboard.friends();  // render the friends board
+renderRecords(friends);  // {name, avatar, score, rank, is_me} — highlight is_me
+```
+
+Submit only real, earned scores (the server keeps the best per player, so
+submitting every run is fine). `friends()`/`top()` are safe to call anytime
+after `Usion.init`.
 
 ## Chat
 
@@ -560,6 +599,49 @@ function showScreen(render, onBack) {
   else Usion.releaseBackButton();   // root screen: host shows ✕ (close)
 }
 ```
+
+## Hybrid tabbed services (SDK ≥ 2.25)
+
+A **bot** service that also registers `tabs` (see the publishing reference)
+gets a hybrid host screen: the platform's **native bot chat** is one tab, and
+your app's own pages are the other tabs — rendered in ONE persistent
+iframe/WebView that stays mounted across tab switches. Chat traffic rides the
+normal bot webhook + Bot API; these SDK methods are only the screen bridge:
+
+```javascript
+// Host → app: the user tapped one of your tabs (or a deep link targeted one).
+Usion.onHostNavigate(({ path, tab }) => showSection(path)); // tab = key or null
+Usion.offHostNavigate();
+
+// App → chat: switch to the native chat tab with the composer PRE-FILLED.
+// Never auto-sends — the user reviews the text and presses send.
+Usion.openChat({ prefill: 'Remix this video with a sunset sky' });
+
+// App → tab bar: keep the host's tab highlight in sync when the user
+// navigates INSIDE your app (fire-and-forget; never echoed back to you).
+Usion.reportPath('/results');
+```
+
+Rules:
+- **Detect hosting via `Usion.config.hostTabs === true`** (set in the INIT
+  config only when the hybrid screen hosts you). When true, hide your own
+  in-app tab bar / chat UI — the host renders the tab bar and the chatbot
+  lives in the native chat tab. When absent (legacy full-screen iframe opens,
+  old app versions), keep your own chrome working.
+- **Subscribe early.** Calling `onHostNavigate` signals the host that your app
+  navigates in place. If you never subscribe, every tab switch **remounts**
+  your app with the new path delivered as `Usion.getLaunchParams().path`
+  (deterministic fallback — but a full reload, so subscribe if you're a SPA).
+- `HOST_NAVIGATE` always updates `getLaunchParams().path`, subscriber or not —
+  reading it stays truthful at any time.
+- Tab `path`s are relative paths inside your app (`"/explore"`), declared at
+  registration; the chat tab has no path. Notification deep links
+  (`Usion.notify.send({ path })`) land on the matching tab.
+- **Chat → tab buttons**: your bot may send a component button whose
+  `action_id` is `"open_tab:<path>"` (e.g. `"open_tab:/results"`) — the hybrid
+  screen intercepts it client-side and jumps to the matching tab. Buttons with
+  any other `action_id` do NOT reach your webhook (interactions ride a legacy
+  path) — use plain text replies for decisions.
 
 ## UI utilities
 
