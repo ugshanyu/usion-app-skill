@@ -24,7 +24,7 @@ global object: `window.Usion`.
 |------|--------------|
 | [references/sdk-reference.md](references/sdk-reference.md) | You need the exact API surface — any `Usion.*` method, its signature, quotas, or callback shape |
 | [references/multiplayer.md](references/multiplayer.md) | The app is a multiplayer game — room lifecycle, host-authoritative pattern, netcode helpers |
-| [references/game-engines.md](references/game-engines.md) | The app is a real 2D/3D game — the blessed platform-hosted engine runtimes (Phaser 4; Babylon.js + Havok with its ready-made `PhysicsCharacterController`), the exact allowed `<script>` tags, and engine-specific multiplayer wiring |
+| [references/game-engines.md](references/game-engines.md) | The app is a real 2D/3D game — the blessed platform-hosted engine runtimes (Phaser 4; Babylon.js + Havok with its ready-made `PhysicsCharacterController`; the Usion World Engine for shared 100–200 player worlds with cars, weapons and hazards), the exact allowed `<script>` tags, and engine-specific multiplayer wiring |
 | [references/publishing.md](references/publishing.md) | You're deploying/registering the app — hosting paths, service registry, and links to live deployed exemplar apps |
 | [references/agent-api.md](references/agent-api.md) | You're an AI agent registering/managing services via the REST API with a creator API key — auth, `POST /services`, capturing the one-time signing secret, rotating it |
 
@@ -93,7 +93,7 @@ Quick map of what the platform offers (full signatures in the SDK reference):
 
 - **Identity**: `Usion.user.getId/getName/getAvatar/getProfile`
 - **Money**: `Usion.wallet.getBalance/hasCredits/requestPayment/onBalanceChange`
-- **Device-local storage** (per user, per app): `Usion.storage.get/set/remove/clear/keys` (512 KB/value) and `Usion.fileStorage` for base64 blobs
+- **Durable storage** (per user, per app): `Usion.storage.get/set/remove/clear/keys` is database-backed, survives logout/reinstall/device changes, and keeps a device-local offline cache (512 KB/value); `Usion.fileStorage` remains device-local for base64 blobs
 - **Cloud KV** (server-persisted, cross-device): `Usion.cloud.get/set/remove/keys` + shared per-app bucket `Usion.cloud.shared.*` with atomic `shared.incr` — 64 KB/value, 200 keys & 1 MB/bucket, 60 ops/min
 - **Multiplayer**: `Usion.game.connect/join/action/realtime` + `on*` handlers; netcode helpers (interpolation, prediction, delta snapshots, lockstep, WebRTC mesh, WebTransport, `Usion.netcode.createInterestGrid` AOI spatial hash). World rooms (SDK ≥ 2.23): tag `world` + `Usion.game.joinWorld()` for drop-in/drop-out rooms with backfill — up to 200 players direct/hosted, 32 on the platform relay; hosted mode (`realtime.connection_mode: "hosted"` + a one-file server bundle the platform runs) — see the multiplayer reference
 - **Launch mode**: `Usion.getLaunchParams().mode` is `'single'` (opened from Explore / the Game hub, solo) or `'multiplayer'` (opened from a chat game invite); `Usion.game.isMultiplayer()` is the boolean. Branch your setup on it — don't infer mode from `roomId`, the host declares it. (SDK ≥ 2.18)

@@ -115,6 +115,13 @@ Rules:
 - Render BOTH (all) players.
 - Winner is decided on the host and broadcast — never trust a peer's
   self-reported score, especially for paid outcomes.
+- **Report the result at match end** (1-on-1): once the host decides the
+  outcome, call `Usion.game.reportResult({ winnerId, scores?, displayScore? })`
+  from the host only. The platform then drops a result card into the two
+  players' DM ("You beat Bob — 3 : 1" / "Bob beat you — 1 : 3"). Gate it like
+  your stat recording so it fires exactly once, and pass an EXPLICIT `winnerId`
+  (the platform never infers the winner from the scores). See sdk-reference.md →
+  "Match result cards".
 - `action()` = sequenced + stored, use for turn-based moves (chess, tic-tac-toe).
   `realtime()` = fire-and-forget, use for per-frame state (positions, effects).
 - Handle disconnects per the "Reconnect contract" section below: pause on
@@ -350,6 +357,20 @@ grid.dropObserver(p.id);    // player left — free their tracking state
 
 `observe()` is diffed per observer (`entered`/`left` since its previous call);
 `query(x, y, radius)` is the stateless variant. Both are true circle tests.
+
+### Massive 3D worlds: the Usion World Engine
+
+For "GTA-like", open-world, racing, battle-royale or Fall Guys-shaped games,
+do not build the world yourself — use the platform's world engine
+(`references/game-engines.md`). It ships one deterministic simulation that
+runs as the server authority AND as client prediction: a collidable city,
+drivable vehicles, weapons, moving hazards, touch controls, camera, HUD and
+netcode. You write a mode object (the rules) and a world spec (a seed).
+
+Client: `UsionWorld.start({labels})`. Server: either
+`UsionWorldEngine.createWorldBundle({worldSpec, mode})` as a hosted bundle, or
+`createWorldServer(...)` from `@usions/world-engine/server` on your own host.
+Reference: `microservices/usion-city` (direct mode, 200 players).
 
 ### Hosted rooms (platform runs your server)
 

@@ -15,7 +15,7 @@ If anything here disagrees with the source, the source wins.
 
 1. [Lifecycle & config](#lifecycle--config)
 2. [User](#user) · [Wallet](#wallet) · [Session](#session)
-3. [Storage (device-local)](#storage-device-local) · [File storage](#file-storage) · [Cloud KV](#cloud-kv-server-persisted)
+3. [Storage (durable)](#storage-durable) · [File storage](#file-storage) · [Cloud KV](#cloud-kv-server-persisted)
 4. [Game (multiplayer)](#game-multiplayer)
 5. [Lobby](#lobby) · [Matchmaking](#matchmaking) · [Leaderboard](#leaderboard)
 6. [Chat](#chat) · [Bot](#bot)
@@ -159,10 +159,13 @@ Usion.session.setData(key, value)        // or setData({k1: v1, k2: v2})
 Usion.session.clear()
 ```
 
-## Storage (device-local)
+## Storage (durable)
 
-Per-user, per-service KV on the device (localStorage/AsyncStorage). 512 KB per
-value. Survives restarts, NOT reinstall or device change — cache-grade state.
+Per-user, per-service KV in the platform's non-TTL database. It survives
+logout/login, reinstall, and device changes. The host keeps a best-effort
+localStorage/AsyncStorage cache for offline reads and migrates pre-2.27 local
+values once. A write/delete resolves only after the database acknowledges it.
+Quota: 512 KB/value, 200 keys, 5 MB per user/service storage bucket.
 
 ```javascript
 Usion.storage.get(key)     // Promise<any|null>
@@ -242,6 +245,10 @@ Usion.game.realtime(type, data?)  // fire-and-forget — per-frame state, positi
 Usion.game.requestSync(lastSeq?)  // ask server for full state → onSync (auto-called on reconnect)
 Usion.game.requestRematch()
 Usion.game.forfeit()              // Promise<{success}>
+Usion.game.reportResult(result)   // 2–8 player match end → result cards (SDK ≥ 2.26)
+//   result = {winnerId | draw, standings?, scores?, displayScore?, metric?}. Host-auth, call once.
+//   Started in a GROUP CHAT → one ranked card in that group; otherwise → DM cards.
+//   standings = finishing order, best first (SDK ≥ 2.27). See "Match result cards" under Leaderboard.
 Usion.game.invite(opts?)          // open host friend/group picker → fill your room (SDK ≥ 2.19)
 //   Promise<{success, roomId, invited[]}>. Recent chats + username search + your groups,
 //   multi-select; each pick gets a game-invite card; tappers join THIS room → onPlayerJoined.
@@ -434,8 +441,11 @@ config and call `submit()` on game over. The platform does the rest.
 Service config (set at registration / publish):
 
 ```json
-"leaderboard": { "enabled": true, "order": "desc", "max_score": 100000 }
+"leaderboard": { "enabled": true, "order": "desc", "metric": "score", "max_score": 100000 }
 // order: "desc" = higher is better (default) · "asc" = lower is better (time trials, golf)
+// metric (optional): "score" (default) · "level" — for a LEVEL-based game,
+//   submit the highest level reached as the score and set "level"; the Game
+//   Center hub then shows "Level 42" instead of a bare number.
 // max_score (optional): scores beyond this still record but never fire record
 //   notifications — a plausibility guard against forged scores.
 ```
@@ -459,6 +469,13 @@ code:
   "«Name» beat your record on «YourGame»" message + push that opens your game.
   This is the platform's virality loop — you write zero code for it; it's a
   direct consequence of calling `submit()`.
+- **Global top-5 notifications**: entering the global top 5 pings the player
+  ("You're now #3 on «YourGame» globally"), and the player they knocked out of
+  the top 5 gets notified too — both open your game. Also free from `submit()`.
+
+Show BOTH boards on your game-over screen — `friends()` (who the player knows)
+and `top({limit:10})` (the worldwide board to chase). A Friends/Global toggle
+is the clean pattern (see the Flappy reference).
 
 **Recommended pattern for a score-based game** (this is what the Flappy
 reference app does — see publishing.md):
@@ -474,6 +491,63 @@ renderRecords(friends);  // {name, avatar, score, rank, is_me} — highlight is_
 Submit only real, earned scores (the server keeps the best per player, so
 submitting every run is fine). `friends()`/`top()` are safe to call anytime
 after `Usion.init`.
+
+### Match result cards (`Usion.game.reportResult`, SDK ≥ 2.26)
+
+Report the final result of a **2–8 player match** when it ends and the platform
+delivers a result card with a tap-to-play button. This is the per-match companion
+to the leaderboard's record-beaten notifications: use `submit()` for "best score
+ever" bragging, `reportResult()` for "here's how our game just went".
+
+**Where the card lands follows where the game was launched from** (the room's
+originating chat) — you don't choose it, and you don't pass a chat id:
+
+| Launched from | Delivery |
+|---|---|
+| A **group chat** | ONE ranked standings card posted into that group. Includes 1-on-1, so the group sees who beat who. |
+| **Anywhere else** (GameTok, invite, matchmaking) | Cards in the **DMs**, each written from that player's own perspective. 1-on-1 → "You beat Bob — 3 : 1" / "Bob beat you — 1 : 3". 3–8 players → a standings card across the host↔guest DMs. |
+
+Group chats are server-visible, so the group card is posted directly. Personal
+chats are zero-knowledge, so DM cards ride a `game:result` socket event that each
+client renders into its own local DM history.
+
+```javascript
+// Call ONCE, from the authoritative client only (config.playerIds[0] / your
+// host), the moment the match ends. Pass an EXPLICIT winnerId — the platform
+// never guesses the winner from the scores, so lowest-score-wins games (golf,
+// "13") and games with no numeric score (elimination, race) work identically.
+Usion.game.reportResult({
+  winnerId: players[winnerSeat],          // required (or draw: true)
+  scores: { [players[0]]: 3, [players[1]]: 1 },  // optional, keyed by userId
+  displayScore: '3 - 1',                   // optional, your own score text
+  metric: 'goals',                         // optional label
+});
+// draw:  Usion.game.reportResult({ draw: true, scores: {...} });
+
+// 3–8 players: declare the finishing ORDER, best first (SDK ≥ 2.27).
+Usion.game.reportResult({
+  winnerId: order[0],
+  standings: order,                        // ['alice','bob','chi','dorj']
+  scores: { alice: 6, bob: 5, chi: 3, dorj: 1 },
+});
+```
+
+- **Authoritative client only, once.** Gate it exactly like your stat recording
+  (`gamePhase === 'ended'` etc.) so a losing peer can't fire a fake result — the
+  backend also re-checks that the players really shared this room and dedupes,
+  but the game should still only call it from the host.
+- **`winnerId` is explicit** and must be a real participant. Omit it only with
+  `draw: true`. `scores`/`displayScore` are optional decoration for the card.
+- **`standings` is how you express a ranking** for 3+ players — it can NEVER be
+  derived from `scores`, because a high score wins in some games and a low one
+  wins in others. Ids not in the room are ignored, anyone you omit is appended,
+  and the winner is always pulled to the front. Without it the card still shows
+  the right winner, just with the rest in roster order.
+- **Scoreless games should omit `scores`** — sending zeros renders a "0 : 0"
+  line. Send scores only when the number means something (mini golf points, not
+  Connect Four).
+- Bot/AI seats are dropped (only real users are messaged), so a "you vs 3 bots"
+  game produces no card at all.
 
 ## Chat
 
@@ -661,7 +735,7 @@ Design tokens: `https://usions.com/usion-design-system.css`.
 don't need to call `Usion.game.connect()` first — the first cloud /
 leaderboard / notify / lobby / matchmaking call connects automatically
 (SDK ≥ 2.22). Embedded mode only
-allows these prefixes: **`lobby:*`, `mm:*`, `lb:*`, `kv:*`, `notify:*`**. A new prefix
+allows these prefixes: **`lobby:*`, `mm:*`, `lb:*`, `kv:*`, `notify:*`, `gc:*`**. A new prefix
 requires editing `BACKEND_EMIT_ALLOWED` in BOTH
 `web/app/(main)/chat/iframe/[id]/game-handlers.ts` and
 `mobile/features/iframe/message-handler.ts`, plus a backend
