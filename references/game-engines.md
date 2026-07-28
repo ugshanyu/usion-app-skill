@@ -13,14 +13,8 @@ on the device and shared across all Usion games.
   wanting sprites, tweens, particles, or 2D arcade physics.
 - **Babylon.js + Havok** — real 3D games: physics playgrounds, ball-rollers,
   third-person character games ("walk around a world" — Roblox-style).
-- **Usion World Engine** — a shared 3D WORLD: a city with drivable cars,
-  weapons, hazards and up to 200 players in one place. Use it whenever the ask
-  is "GTA-like", "open world", "racing through a city", "battle royale",
-  "Fall Guys", or any competition many players join at once. It brings its own
-  Babylon renderer, so load Babylon with it and never Havok.
 
-Never load an engine "just in case", and never load more than one (the world
-engine plus Babylon is one choice, not two).
+Never load an engine "just in case", and never load more than one.
 
 ## Allowed script tags (copy EXACTLY)
 
@@ -34,10 +28,6 @@ injects the Usion SDK — never add that one yourself.)
 <!-- 3D games (Havok is the physics engine; its .wasm loads from the same folder) -->
 <script src="https://usions.com/vendor/babylon/9.16.1/babylon.js"></script>
 <script src="https://usions.com/vendor/havok/1.3.13/HavokPhysics_umd.js"></script>
-
-<!-- Shared 3D worlds: massively-multiplayer city/vehicle/combat games -->
-<script src="https://usions.com/vendor/babylon/9.16.1/babylon.js"></script>
-<script src="https://usions.com/vendor/usion-world/1.0.0/usion-world.js"></script>
 ```
 
 No other CDN, no other version, no other library (no three.js, no jQuery, no
@@ -131,67 +121,6 @@ Camera for third-person: `new BABYLON.ArcRotateCamera('cam', -Math.PI/2, 1.1, 9,
 + `camera.lockedTarget = capsule` (skip `attachControl` if you drive the camera
 yourself). Add one `HemisphericLight`. On-screen thumb joystick + jump button
 (DOM overlay) — touch-first, never keyboard-only.
-
-## Usion World Engine (shared 3D worlds, 100–200 players)
-
-`UsionWorld` is a whole world in a script tag: a city you can collide with,
-cars you can drive, weapons, moving hazards, touch controls, a third-person
-camera, a HUD, client prediction and interpolation. The SAME simulation runs
-on the server as the authority, so nobody can cheat their position and nothing
-drifts.
-
-Client — this is the complete app:
-
-```html
-<script src="https://usions.com/vendor/babylon/9.16.1/babylon.js"></script>
-<script src="https://usions.com/vendor/usion-world/1.0.0/usion-world.js"></script>
-<script>
-Usion.init(function () {
-  UsionWorld.start({
-    labels: STRINGS[Usion.getLanguage()] || STRINGS.en,   // your translations
-    locale: Usion.getLanguage(),
-  });
-});
-</script>
-```
-
-`start()` joins the world (`joinWorld()` + `connectDirect()`), regenerates the
-world from the seed the server sends, and runs everything. Do NOT write your
-own render loop, movement code, or netcode around it.
-
-Server — a world game needs one, and the platform can host it. Register with
-`realtime.connection_mode: "hosted"` + `server_bundle_url` and ship ONE file:
-
-```javascript
-module.exports = UsionWorldEngine.createWorldBundle({
-  worldSpec: { generator: 'city', options: { seed: 7, blocks: 6 } },
-  mode: { id: 'race', laps: 2 },       // freeroam | deathmatch | race | elimination
-});
-```
-
-A custom competition is a plain object of hooks — the physics never changes:
-
-```javascript
-const myMode = {
-  id: 'tag',
-  config: { respawnDelay: 3, startWeapons: ['shove'] },
-  init(sim) { sim.state.mode = { phase: 'live', endsAt: sim.state.t + 180 }; },
-  onDeath(sim, victim, killer) { if (killer) killer.score += 1; },
-  onCheckpoint(sim, player, cp) { player.score += 5; },
-  onTick(sim, dt) { /* your rules */ },
-  projectState(sim) { return { phase: sim.state.mode.phase }; },  // codes, never sentences
-};
-```
-
-Rules that matter:
-
-- The world is described by a SPEC, not assets: `{generator:'city', options:{seed}}`.
-  Both sides generate identical geometry — never ship or fetch a mesh.
-- Tag the service `game` + `multiplayer` + `world` (drop-in/drop-out, cap 200).
-- Mode state you replicate must be CODES and numbers; the client localizes.
-- Never run Havok next to it: two solvers diverge and the game feels broken.
-- Reference implementation: `microservices/usion-city` (live at
-  usion-city-production.up.railway.app), engine: `packages/world-engine`.
 
 ## Multiplayer with an engine
 

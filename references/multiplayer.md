@@ -358,20 +358,6 @@ grid.dropObserver(p.id);    // player left — free their tracking state
 `observe()` is diffed per observer (`entered`/`left` since its previous call);
 `query(x, y, radius)` is the stateless variant. Both are true circle tests.
 
-### Massive 3D worlds: the Usion World Engine
-
-For "GTA-like", open-world, racing, battle-royale or Fall Guys-shaped games,
-do not build the world yourself — use the platform's world engine
-(`references/game-engines.md`). It ships one deterministic simulation that
-runs as the server authority AND as client prediction: a collidable city,
-drivable vehicles, weapons, moving hazards, touch controls, camera, HUD and
-netcode. You write a mode object (the rules) and a world spec (a seed).
-
-Client: `UsionWorld.start({labels})`. Server: either
-`UsionWorldEngine.createWorldBundle({worldSpec, mode})` as a hosted bundle, or
-`createWorldServer(...)` from `@usions/world-engine/server` on your own host.
-Reference: `microservices/usion-city` (direct mode, 200 players).
-
 ### Hosted rooms (platform runs your server)
 
 Register with `realtime.connection_mode: "hosted"` + `server_bundle_url`

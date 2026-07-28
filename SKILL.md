@@ -24,7 +24,7 @@ global object: `window.Usion`.
 |------|--------------|
 | [references/sdk-reference.md](references/sdk-reference.md) | You need the exact API surface — any `Usion.*` method, its signature, quotas, or callback shape |
 | [references/multiplayer.md](references/multiplayer.md) | The app is a multiplayer game — room lifecycle, host-authoritative pattern, netcode helpers |
-| [references/game-engines.md](references/game-engines.md) | The app is a real 2D/3D game — the blessed platform-hosted engine runtimes (Phaser 4; Babylon.js + Havok with its ready-made `PhysicsCharacterController`; the Usion World Engine for shared 100–200 player worlds with cars, weapons and hazards), the exact allowed `<script>` tags, and engine-specific multiplayer wiring |
+| [references/game-engines.md](references/game-engines.md) | The app is a real 2D/3D game — the blessed platform-hosted engine runtimes (Phaser 4; Babylon.js + Havok with its ready-made `PhysicsCharacterController`), the exact allowed `<script>` tags, and engine-specific multiplayer wiring |
 | [references/publishing.md](references/publishing.md) | You're deploying/registering the app — hosting paths, service registry, and links to live deployed exemplar apps |
 | [references/agent-api.md](references/agent-api.md) | You're an AI agent registering/managing services via the REST API with a creator API key — auth, `POST /services`, capturing the one-time signing secret, rotating it |
 
