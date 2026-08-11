@@ -74,7 +74,11 @@ builds flagged/rejected):
   launch, since the host can promote a solo game to multiplayer mid-session
   (handle `Usion.game.onRoomAssigned`; see Step 4).
 - Money moves only through `Usion.wallet.requestPayment(amount, reason)` —
-  never invent custom payment flows.
+  never invent custom payment flows. ⚠️ A charge is an ESCROW HOLD: your server
+  MUST settle the returned `receiptToken` (`POST /wallet/receipt/settle`) or the
+  platform auto-refunds the user after 72h and you earn nothing. Instant goods
+  (hints, unlocks) settle immediately; failed work refunds. See "Settling is
+  MANDATORY" in the SDK reference.
 - Do NOT build room codes, invite/share UIs, matchmaking UIs, or wager
   pickers — the platform owns those (rooms, matchmaking, `game_invite` chat
   flow). Your game receives `config.roomId` and `config.playerIds` already set.
@@ -92,7 +96,7 @@ Design: mobile-first, small embedded frame, Vercel-inspired minimalism
 Quick map of what the platform offers (full signatures in the SDK reference):
 
 - **Identity**: `Usion.user.getId/getName/getAvatar/getProfile`
-- **Money**: `Usion.wallet.getBalance/hasCredits/requestPayment/onBalanceChange`
+- **Money**: `Usion.wallet.getBalance/hasCredits/requestPayment/onBalanceChange` — every `requestPayment` receipt must be settled server-side or it auto-refunds in 72h (SDK reference → "Settling is MANDATORY")
 - **Durable storage** (per user, per app): `Usion.storage.get/set/remove/clear/keys` is database-backed, survives logout/reinstall/device changes, and keeps a device-local offline cache (512 KB/value); `Usion.fileStorage` remains device-local for base64 blobs
 - **Cloud KV** (server-persisted, cross-device): `Usion.cloud.get/set/remove/keys` + shared per-app bucket `Usion.cloud.shared.*` with atomic `shared.incr` — 64 KB/value, 200 keys & 1 MB/bucket, 60 ops/min
 - **Multiplayer**: `Usion.game.connect/join/action/realtime` + `on*` handlers; netcode helpers (interpolation, prediction, delta snapshots, lockstep, WebRTC mesh, WebTransport, `Usion.netcode.createInterestGrid` AOI spatial hash). World rooms (SDK ≥ 2.23): tag `world` + `Usion.game.joinWorld()` for drop-in/drop-out rooms with backfill — up to 200 players direct/hosted, 32 on the platform relay; hosted mode (`realtime.connection_mode: "hosted"` + a one-file server bundle the platform runs) — see the multiplayer reference

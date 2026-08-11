@@ -148,6 +148,91 @@ const { receiptToken } = await Usion.wallet.requestPayment(100, 'Pack of 100', {
 
 Omit `opts` (or `idempotencyKey`) for the simple one-shot behavior.
 
+### ⚠️ Settling is MANDATORY — an unsettled charge is auto-refunded
+
+`requestPayment` is an **escrow hold**, not a completed sale. The user is
+debited immediately, but the money is NOT paid to you (the creator) until your
+server **settles** the receipt. If you never settle, the platform assumes the
+user paid and got nothing, and **automatically refunds the full amount after
+72 hours**. A mini-app that charges but never settles earns exactly zero — every
+charge silently bounces back to the user three days later.
+
+So every `receiptToken` must end in exactly one of two calls to the platform
+backend (`https://mobile.mongolai.mn`). Both are unauthenticated-but-signed:
+the receipt token itself is the credential (an HS256 JWT only the wallet can
+mint), and both are idempotent — safe to retry:
+
+```
+POST https://mobile.mongolai.mn/wallet/receipt/settle
+Content-Type: application/json
+{ "receipt_token": "<receiptToken>" }
+→ 200 { "outcome": "settled", "tx_id": "…", "status": "completed" }
+// Work succeeded → capture the charge. ~90% is credited to the service
+// creator's wallet, the platform keeps the fee. outcome may also be
+// "already_settled" (retry no-op) or "already_refunded" (you were too late —
+// the 72h sweeper or your own refund got there first).
+
+POST https://mobile.mongolai.mn/wallet/receipt/refund
+Content-Type: application/json
+{ "receipt_token": "<receiptToken>" }
+→ 200 { "outcome": "refunded", "tx_id": "…", "status": "refunded" }
+// Work failed → release the hold back to the user. Never keep money for
+// work you didn't deliver.
+```
+
+Optional pre-flight before spending your own provider credits (read-only, no
+mutation — if this fails you owe nothing and need no refund):
+
+```
+POST https://mobile.mongolai.mn/wallet/receipt/verify-pending
+{ "receipt_token": "…", "expected_service_id": "<your service id>",
+  "expected_amount": 100 }
+→ 200 { "valid": true, "tx_id": "…", "user_id": "…", "amount": 100, "status": "pending" }
+// The expected_* fields stop a token minted for another app/amount from being
+// replayed against yours. 409 = already settled/refunded.
+```
+
+**Which pattern to use:**
+
+- **Instant delivery** (hint, unlock, power-up, extra life — anything you hand
+  over the moment the promise resolves): settle **immediately**, in the same
+  flow as the charge. Client passes the token to your server (or your server
+  receives it however you like) and the server calls `/settle` right away.
+  There is no reason to wait — waiting is how charges fall into the 72h
+  refund trap.
+- **Deferred/failable work** (AI generation, long jobs): charge → do the work →
+  `/settle` on success, `/refund` on failure. Persist the `receiptToken` with
+  the job so a crash between "work done" and "settle" can be retried — the
+  endpoints are idempotent, so replaying is always safe.
+- **No server at all?** Then don't use `requestPayment` — a purely client-side
+  app has nowhere trustworthy to settle from, and every charge will auto-refund.
+  Either add a tiny server endpoint that settles, or make the app free.
+
+```javascript
+// Client (instant-delivery pattern):
+const { receiptToken } = await Usion.wallet.requestPayment(100, 'Hint', { idempotencyKey: key });
+await fetch('https://YOUR-SERVER/api/purchase-hint', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ receiptToken }),
+});
+
+// YOUR server:
+app.post('/api/purchase-hint', async (req, res) => {
+  const r = await fetch('https://mobile.mongolai.mn/wallet/receipt/settle', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ receipt_token: req.body.receiptToken }),
+  });
+  const out = await r.json();
+  if (out.outcome === 'settled' || out.outcome === 'already_settled') {
+    return res.json({ ok: true, hint: computeHint() });   // deliver ONLY once settled
+  }
+  return res.status(409).json({ ok: false });             // refunded/invalid → don't deliver
+});
+```
+
+Never mark the purchase delivered before `/settle` succeeds, and never settle
+before you're sure you can deliver.
+
 ## Session
 
 Ephemeral per-open state, synced to the host.
