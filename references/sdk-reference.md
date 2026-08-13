@@ -63,12 +63,41 @@ contracts every app with its own backend must follow:
   goes stale and turns into 401s an hour in.
 - **Your server verifies it with `POST {apiUrl}/iframe/verify-token`**, body
   `{"token": "...", "expected_service_id": "<your service id>"}` →
-  `{user_id, name, avatar}`. Do NOT send it to `/auth/me` — user-facing
+  `{user_id, name, avatar, is_guest}`. Do NOT send it to `/auth/me` — user-facing
   endpoints reject iframe-scoped tokens by design. Never trust a client-claimed
   user id; verify server-side and cache briefly. Game-room REST endpoints
   (`POST /games/rooms`, `/games/rooms/{id}/join`, `GET /games/rooms/{id}`,
   matchmake) DO accept the scoped token — but only for rooms of your own
   service.
+
+### Guest visitors (web) — design for them, they're your funnel
+
+On the web, a **logged-out visitor can open your app from a shared link** and
+should get a real taste of it before being asked to sign up. What that means
+for your code:
+
+- **Identity:** guests appear as `userId` starting with `guest_` (e.g.
+  `guest_5f0c…`), name "Guest". The id is stable per browser, so per-user
+  device storage keys keep working. It is NOT an account.
+- **Their token is real.** Guests receive a scoped iframe token too; your
+  backend verifies it through the same `/iframe/verify-token` call and gets
+  `{user_id: "guest_…", name: "Guest", is_guest: true}`. So don't blanket-401
+  tokenless-looking visitors — verify, branch on `is_guest`, and serve your
+  **read-only / anonymous tier**: browse content, daily puzzle, solo play.
+  Progress keyed by the `guest_` id is fine (anonymous, per-device); don't
+  attach anything you'd regret to it (payments, cross-device state).
+- **Platform writes fail with `AUTH_REQUIRED` for guests** — `lb:submit`,
+  `cloud.set/incr`, multiplayer (`game.connect/join`, lobby, matchmaking),
+  payments, share, invites. The host shows the visitor a login prompt at that
+  moment and, for `leaderboard.submit`, replays the score after they sign in.
+  Your job is only to not crash: wrap these in try/catch (you should already)
+  and let solo/local modes carry the experience. Reads keep working: `lb.top`
+  serves the real board, `cloud.get` returns empty, local `storage.*` works.
+- **Opting out:** if your app genuinely has no guest surface, set
+  `guest_access: "none"` on your service registration — logged-out visitors
+  then get a login screen instead of a half-working app (paid apps and SDK v3
+  apps are gated like this automatically). Default is open; prefer it — a
+  playable teaser converts far better than a wall.
 
 **Single vs multiplayer (SDK ≥ 2.18):** `Usion.getLaunchParams().mode` is
 `'single'` (opened from Explore / the Game hub, played solo) or `'multiplayer'`
@@ -519,9 +548,16 @@ Usion.matchmaking.onMatch(cb)
 
 ## Leaderboard + records
 
-**If your game has a score, a high score, or a time — enable this.** It is the
-platform's built-in retention loop, and it's almost free: opt in on the service
+**Every game on Usion ships a leaderboard — this is required, not optional.**
+It is how a game reaches Game Center (the platform's records hub) and how it
+gets its retention loop, and it costs almost nothing: opt in on the service
 config and call `submit()` on game over. The platform does the rest.
+
+If the game has no obvious number, give it one and submit that — total wins,
+best time (`order: "asc"`), highest level reached (`metric: "level"`), longest
+streak, highest round survived. A game with no leaderboard never appears in
+Game Center, never sends a "friend beat your record" notification, and has no
+reason for a player to come back.
 
 Service config (set at registration / publish):
 
@@ -534,6 +570,13 @@ Service config (set at registration / publish):
 // max_score (optional): scores beyond this still record but never fire record
 //   notifications — a plausibility guard against forged scores.
 ```
+
+An **AI Creator build has no service config to edit** — publishing reads the
+built code: calling `Usion.leaderboard.submit(...)` turns the leaderboard on,
+and `<meta name="usion:leaderboard" content="asc">` in the entry HTML declares
+that a lower score wins (times, strokes, moves). Higher-wins is the default.
+The config is set once at first publish and never overwritten afterwards, so a
+board that is already live can't be reshuffled by a re-publish.
 
 ```javascript
 Usion.leaderboard.submit(score, metadata?)  // Promise<{success, score, best, rank, updated}>

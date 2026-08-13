@@ -82,10 +82,9 @@ builds flagged/rejected):
 - Do NOT build room codes, invite/share UIs, matchmaking UIs, or wager
   pickers — the platform owns those (rooms, matchmaking, `game_invite` chat
   flow). Your game receives `config.roomId` and `config.playerIds` already set.
-  An in-game **waiting room / ready screen** IS allowed (optional): while
-  invited players trickle into the room a game MAY show who's present with a
-  ready toggle and a host-start (see the multiplayer reference). A simple duel
-  should still just start the moment everyone in `config.playerIds` has joined.
+  An in-game **waiting hall / ready screen IS required** for multiplayer (see
+  the game checklist below and the multiplayer reference) — it's the room the
+  chat invite leads to, duels included.
 
 Design: mobile-first, small embedded frame, Vercel-inspired minimalism
 (black/white, flat, generous whitespace). Respect `Usion.getTheme()` and
@@ -102,7 +101,7 @@ Quick map of what the platform offers (full signatures in the SDK reference):
 - **Multiplayer**: `Usion.game.connect/join/action/realtime` + `on*` handlers; netcode helpers (interpolation, prediction, delta snapshots, lockstep, WebRTC mesh, WebTransport, `Usion.netcode.createInterestGrid` AOI spatial hash). World rooms (SDK ≥ 2.23): tag `world` + `Usion.game.joinWorld()` for drop-in/drop-out rooms with backfill — up to 200 players direct/hosted, 32 on the platform relay; hosted mode (`realtime.connection_mode: "hosted"` + a one-file server bundle the platform runs) — see the multiplayer reference
 - **Launch mode**: `Usion.getLaunchParams().mode` is `'single'` (opened from Explore / the Game hub, solo) or `'multiplayer'` (opened from a chat game invite); `Usion.game.isMultiplayer()` is the boolean. Branch your setup on it — don't infer mode from `roomId`, the host declares it. (SDK ≥ 2.18)
 - **Social**: `Usion.lobby.*` (parties + codes), `Usion.matchmaking.find/cancel/onMatch`, `Usion.leaderboard.submit/top/friends/me`
-- **Records & leaderboards** — **if the game has a score, high score, or time, enable this.** Set `leaderboard: {enabled: true, order: "desc"|"asc", max_score?}` on the service and call `Usion.leaderboard.submit(score)` on game over. You get the platform's records loop for free: your game appears in **Game Center** (players see their best + friends' records), and beating a friend's best auto-sends them a "«Name» beat your record" notification that reopens your game. Show `Usion.leaderboard.friends()` on your game-over screen. Reference app: **Flappy** (see references/publishing.md). Details in the SDK reference "Leaderboard + records" section.
+- **Records & leaderboards** — **every game enables this** (see the game checklist in Step 3.5). Set `leaderboard: {enabled: true, order: "desc"|"asc", max_score?}` on the service and call `Usion.leaderboard.submit(score)` on game over. You get the platform's records loop for free: your game appears in **Game Center** (players see their best + friends' records), and beating a friend's best auto-sends them a "«Name» beat your record" notification that reopens your game. Show `Usion.leaderboard.friends()` on your game-over screen. Reference app: **Flappy** (see references/publishing.md). Details in the SDK reference "Leaderboard + records" section.
 - **Invite friends**: `Usion.game.invite()` opens the host's friend/group picker (recent + username search + groups, multi-select) and fills your room — tappers join THIS room and you get `onPlayerJoined`. Works even when launched solo (host makes a room, joins you as host). The host ALSO shows a top-bar **Share** button on every game (same picker) — using it promotes a solo launch into a room and fires `Usion.game.onRoomAssigned`. Don't build your own invite/Share UI. (SDK ≥ 2.20)
 - **Chat integration**: `Usion.chat.sendMessage/createPersonalChat`, `Usion.bot.*` for inline bot widgets
 - **Permissions**: `Usion.permissions.request(['notifications'])` shows a host modal (allow/cancel); `query`/`has` read state without prompting. Capabilities are platform-enforced — **ask before you act**. Users manage grants later in app settings. First permission: `notifications`. (SDK ≥ 2.17)
@@ -114,6 +113,56 @@ Backend-channel modules (lobby `lobby:*`, matchmaking `mm:*`, leaderboard
 `lb:*`, cloud `kv:*`, notify `notify:*`) work both standalone and embedded automatically. Adding a
 NEW event prefix requires allowlist changes in both hosts plus a backend
 handler — see CLAUDE.md "Backend channel rule" before attempting.
+
+## Step 3.5 — If you are building a GAME, this checklist is non-negotiable
+
+Every one of these is how the platform's own games behave («13», Table Soccer,
+Mini Golf, Sequence, Ludo). Full detail in
+[references/multiplayer.md](references/multiplayer.md).
+
+1. **Two entry points, two behaviours.** Branch on
+   `Usion.getLaunchParams().mode`, never on `roomId`:
+   - `'single'` (GameTok / Explore) → **start playing instantly** vs bots or
+     solo. Zero taps: no menu, no difficulty picker, no waiting screen.
+   - `'multiplayer'` (a friend's chat invite) → open the **waiting hall**.
+   - A solo round can be promoted mid-session (host's Share button): register
+     `Usion.game.onRoomAssigned` up front, tear down the bot round, show the
+     waiting hall.
+2. **Multiplayer games have a waiting hall.** Present players with avatars, a
+   READY toggle each, host-only Start enabled once everyone present is ready
+   (min 2), seat order locked into the match's first stored `action`, plus a
+   "play with bots" escape hatch and `Usion.game.invite()` for more players.
+   Required for 2-player duels too.
+3. **Multiplayer games have in-game chat: quick phrases + free text.** A
+   tap-to-send list of ~6–10 localized canned phrases plus a "type your own"
+   input, sent with `Usion.game.realtime('quick_chat', {phrase})` (never
+   `Usion.chat.sendMessage`), rendered as short-lived bubbles on the sender's
+   seat. Rate-limit, cap the length, render with `textContent`, and hide the
+   affordance in solo/bot rounds.
+4. **Every game has a leaderboard, and it feeds Game Center.** Set
+   `leaderboard: {enabled: true, order}` on the service and `submit()` on game
+   over; show `Usion.leaderboard.friends()` + `top({limit:10})` on the
+   game-over screen. No number? Submit wins, best time, or level reached.
+   Report match outcomes with `Usion.game.reportResult({winnerId, ...})` so the
+   result card lands back in the chat the game was started from.
+5. **2+ players must not lag or glitch.** Host broadcasts at 15–20 Hz on a
+   timer (never per rendered frame), guests interpolate instead of snapping,
+   `realtime()` for per-frame state and `action()` for turns, apply exactly
+   once in the handler (never optimistically *and* on echo), small quantized
+   payloads. Verify with `Usion.game.simulateNetwork(...)`.
+6. **Survive every disconnect.** Pause on `onDisconnect` / `onConnectionState`,
+   resync from your own last sequence on return, a wall-clock heartbeat to
+   detect mobile WebView freezes (no `visibilitychange` on React Native),
+   checkpoint from whoever just acted, and a forfeit grace window (~20 s)
+   before anyone is folded.
+7. **Turn-based: the first move is random, and there's a grace clock.** Derive
+   the starting seat from the seed in the match's first stored action — never
+   `playerIds[0]`, or the person who sent the invite opens every single game —
+   and re-roll it on a rematch. Then: wall-clock deadline per turn (not a tick
+   counter), frozen while your own link is down and credited back on reconnect,
+   auto-move on timeout, and a single elected client that plays for a stalled
+   seat after a further grace window — a locked phone must never freeze the
+   table.
 
 ## Step 4 — Multiplayer (if applicable)
 
@@ -162,6 +211,14 @@ calls `Usion.game.join` will not get multiplayer rails.
 
 ## Working exemplars (study before writing code)
 
+- ⭐ **«13» (Mongol Poker)** — https://github.com/nelsuh/13 (MIT, live at
+  https://13-phi-ten.vercel.app). **The reference game: read it first.** Three
+  files, no build step, and it implements every rule in the Step 3.5 checklist —
+  launch-mode split (GameTok → instant bots round, invite → waiting hall),
+  READY-gated waiting hall with host start, `onRoomAssigned` promotion, turn
+  grace clock with an elected proxy move for a sleeping phone, forfeit grace,
+  checkpoint+replay reconnect recovery, leaderboard/Game Center, `reportResult`,
+  mn/en i18n. Copy its structure instead of inventing one.
 - `microservices/tic-tac-toe/app/page.tsx` — cleanest platform-mode multiplayer
   lifecycle. Live: https://usion-example-turnbased.vercel.app (turn-based
   reference) and https://usion-example-realtime.vercel.app (real-time Tag Arena).

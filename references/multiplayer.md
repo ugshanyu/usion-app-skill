@@ -4,27 +4,149 @@ The platform owns rooms, matchmaking, invites (`game_invite` chat flow), and
 the transport. Your game owns the rules, the simulation, and the rendering.
 Never rebuild room codes, invite/share UIs, matchmaking UIs, or wager pickers.
 
-An in-game **waiting room (lobby) is allowed** — optional, and in-room only:
-while the invited players trickle into `config.roomId` a game MAY show who's
-present, a ready toggle, and a host-start button. The reference pattern (from
-the «13» card game): keep a `presentIds` set + `ready` map fed by
-`onPlayerJoined`/`onPlayerLeft` and a `player_info` realtime broadcast; order
-seats by the `config.playerIds` roster; when the HOST starts, it locks the seat
-order into its first stored `action` (the deal/start), so every client — and
-every reconnect — derives identical seating. What a lobby must never do:
-create/switch rooms, draw invite/share affordances (the host's Share button and
-`Usion.game.invite()` own that), or gate a simple 2-player duel that should
-just start when both players have joined.
+## The required shape of a Usion game (read this first)
+
+A game is opened from two completely different places, and the platform expects
+two completely different behaviours. Getting this wrong is the single most
+common reason a game feels broken.
+
+| Opened from | `getLaunchParams().mode` | Your game MUST |
+|---|---|---|
+| **GameTok / Explore** (browse feed, tap to play) | `'single'` | Start playing **immediately** — solo or vs bots. Zero taps: no menu, no difficulty picker, no waiting room, no "Play" button. |
+| **A chat game invite** (friend tapped the invite card) | `'multiplayer'` | Open the **waiting hall**: who's here, a READY toggle, host presses Start. |
+| A solo session **promoted** by the host's Share button | stays `'single'`; `onRoomAssigned` fires | Tear down the solo/bot round and open the **waiting hall** as host. |
+
+Decide it from the launch MODE, never from `roomId` — a solo launch can still be
+handed an auto-created `standalone_*` room for SDK plumbing, and games that
+guessed from `roomId` stranded solo players forever on "waiting for opponent":
+
+**The whole of this document is implemented, working, in one small open-source
+game: «13» (Mongol Poker) — https://github.com/nelsuh/13 (MIT, three files, no
+build step; live at https://13-phi-ten.vercel.app). When a rule below is
+unclear, read how «13» does it.**
+
+```javascript
+// Exactly this helper is used by the platform reference games («13», Table
+// Soccer, Ludo, Mini Golf, Plane Battle).
+function launchedSolo(config) {
+  try {
+    var lp = (window.Usion && Usion.getLaunchParams && Usion.getLaunchParams()) || {};
+    if (lp.mode === "single") return true;
+    if (lp.mode === "multiplayer") return false;
+    if (Usion.game && typeof Usion.game.isMultiplayer === "function") return !Usion.game.isMultiplayer();
+    var rid = config && config.roomId ? String(config.roomId) : "";
+    return !rid || /^standalone[_-]/i.test(rid);   // older SDK fallback
+  } catch (_) { return false; }
+}
+
+Usion.init(async function (config) {
+  myId = config.userId;
+  if (config.playerIds) roomPlayerIds = config.playerIds.slice();
+  // Registered UP FRONT regardless of mode — a solo round can be promoted later.
+  if (Usion.game.onRoomAssigned) Usion.game.onRoomAssigned(() => onRoomPromoted());
+
+  if (!launchedSolo(config) && config.roomId) {
+    showWaitingHall();                  // invite path → gather + ready up
+    await setupMultiplayer(config.roomId);   // connect() → register handlers → join()
+  } else {
+    startBotsGame();                    // GameTok path → instant play, no menu
+  }
+});
+```
+
+`onRoomPromoted()` must stop every local timer from the bot round, reset
+`ready`/present state, and show the waiting hall — the SDK has already updated
+`roomId`/`mode` and is joining you as host; `onJoined` lands right after.
+
+## The waiting hall (required for every multiplayer game)
+
+While invited players trickle into `config.roomId`, a multiplayer game shows a
+waiting hall — this is the room the invite card leads to, and it is **required**,
+including for 2-player duels (a duel that auto-starts the instant the second
+socket connects starts while the invitee is still reading the screen).
+
+It must:
+
+- **List everyone present** — avatar + name, in `config.playerIds` roster order,
+  with the host tagged. Feed it from a `presentIds` set updated by
+  `onJoined`/`onPlayerJoined`/`onPlayerLeft`, plus a `player_info` **realtime**
+  broadcast carrying `{name, avatar, ready}` (send yours on join, on every
+  join event, and on every ready toggle — late joiners missed the earlier ones).
+- **Have a READY toggle per player**, mirrored to everyone.
+- **Let only the host start**, and only once every present player is ready
+  (min 2). The Start button is disabled otherwise; non-hosts see
+  "waiting for the host to start…".
+- **Lock the seat order into the first stored `action`** of the match (the
+  deal/kickoff), built from *present + ready* players in roster order. That one
+  action is what makes every client — and every later reconnect — derive
+  identical seating. Never let each client decide seats locally.
+- **Offer an escape hatch**: a "play with bots" button so a player whose friend
+  never shows up isn't trapped, and an invite button that calls
+  `Usion.game.invite()` (the platform picker) when more players are needed.
+
+It must NEVER: create or switch rooms, show a room code, draw its own
+invite/share picker, or show matchmaking/wager UI — the platform owns all of
+that.
+
+## In-game chat: quick phrases + free text (required)
+
+Players sitting in the same room want to talk without leaving the game. Every
+multiplayer game ships both halves (Table Soccer is the reference):
+
+- **Quick chat** — a small tap-to-send list of canned phrases (~6–10, localized
+  with the rest of your strings, trash talk included). This is the primary
+  path: it's one tap, needs no keyboard, and works while a match is live.
+- **Custom chat** — a "type your own" input reachable from the same picker,
+  with a back button to the phrase list. Same send path, same bubble.
+
+It rides the room relay, not the platform chat:
+
+```javascript
+const MAX_CHAT_LENGTH = 60;
+function normalizeChatMessage(v) {
+  if (typeof v !== "string") return "";
+  const m = v.trim().replace(/\s+/g, " ");
+  return m && m.length <= MAX_CHAT_LENGTH ? m : "";
+}
+function sendChat(value) {
+  const phrase = normalizeChatMessage(value);
+  if (!phrase) return false;
+  if (Date.now() - lastChatAt < 700) return false;    // rate limit — spam guard
+  lastChatAt = Date.now();
+  showChatBubble(myId, phrase);                        // instant local feedback
+  Usion.game.realtime("quick_chat", { phrase });       // fire-and-forget
+  return true;
+}
+Usion.game.onRealtime((m) => {
+  if (m.action_type === "quick_chat" && m.player_id !== myId) {
+    showChatBubble(m.player_id, m.action_data && m.action_data.phrase);
+  }
+});
+```
+
+Rules:
+
+- **`Usion.game.realtime`, never `Usion.chat.sendMessage`** — game chat belongs
+  to the room, not to the players' conversation. It is transient by design: no
+  history, no storage, and it must never ride `action()` (chat is not state and
+  must not replay on reconnect).
+- **Render received text as text.** `element.textContent = phrase` — never
+  `innerHTML`. Re-normalize on receive; a peer can send anything.
+- **Rate-limit** (~700 ms) and cap length on send AND receive.
+- **Ephemeral bubbles** anchored to the sender's seat/avatar, auto-dismissing
+  after ~2 s, so chat never blocks the board or steals a turn.
+- **Hide the affordance when there's nobody to talk to** — solo/bot rounds and
+  the pre-join state. Show it once ≥2 real players are in the room.
+- Keep it reachable during play (a small toggle), dismissible with Escape /
+  outside tap, and never covering the active play area.
 
 ## The contract
 
-0. **Know your mode (SDK ≥ 2.18).** `Usion.getLaunchParams().mode` is
-   `'multiplayer'` when opened from a chat game invite, `'single'` when opened
-   solo from Explore / the Game hub (`Usion.game.isMultiplayer()` is the
-   boolean). A game that supports both should branch on it — run the
-   host-authoritative flow below only when multiplayer; play locally when
-   single. The host sets `mode` authoritatively, so trust it rather than
-   inferring from `roomId` (a single-player game may still get an auto room).
+0. **Know your mode (SDK ≥ 2.18)** — see "The required shape" above.
+   `getLaunchParams().mode` is `'multiplayer'` (chat invite → waiting hall) or
+   `'single'` (GameTok / Explore → instant solo-or-bots round);
+   `Usion.game.isMultiplayer()` is the boolean. The host sets `mode`
+   authoritatively — never infer it from `roomId`.
 1. The game opens with `config.roomId` and `config.playerIds` already set by
    the platform (from an invite or matchmaking).
 2. `await Usion.game.connect()` → `await Usion.game.join(config.roomId)`.
@@ -122,6 +244,11 @@ Rules:
   your stat recording so it fires exactly once, and pass an EXPLICIT `winnerId`
   (the platform never infers the winner from the scores). See sdk-reference.md →
   "Match result cards".
+- **Submit to the leaderboard too** — `reportResult()` tells the two players how
+  THIS match went; `Usion.leaderboard.submit(...)` is what puts the game in
+  Game Center and fires "«Name» beat your record". A multiplayer game with no
+  natural score submits its cumulative wins. Both are required; neither
+  replaces the other.
 - `action()` = sequenced + stored, use for turn-based moves (chess, tic-tac-toe).
   `realtime()` = fire-and-forget, use for per-frame state (positions, effects).
 - Handle disconnects per the "Reconnect contract" section below: pause on
@@ -144,6 +271,99 @@ await Usion.game.action('move', { cell: 4 });   // sequenced, stored
 Usion.game.onAction((m) => applyMove(m.player_id, m.action_data, m.sequence));
 Usion.game.onSync((d) => rebuildFrom(d.actions, d.game_state)); // reconnect recovery
 ```
+
+### Who moves first is RANDOM — never the host (required)
+
+The host is just `playerIds[0]`: the person who happened to send the invite.
+Giving that seat the opening move hands the inviter a permanent structural
+advantage, every match, in a game they chose. Decide the starter from chance
+instead, and derive it so every client agrees without a negotiation round:
+
+- **Derive it from the shared seed in the match's first stored `action`.** The
+  host already broadcasts one kickoff action (deal/start) carrying the seed and
+  the locked seat order; every client runs the same pure function on it, so the
+  starter is identical everywhere and identical again after any reconnect
+  replay. «13» does this by dealing from the seed and letting whoever holds the
+  lowest card lead — chance decides, and the deal proves it.
+- A plain `starter = seededRandomInt(seed, playerIds.length)` is fine when your
+  game has no natural "who deals" rule. What matters is that it comes from the
+  seed, not from the roster position and not from `Math.random()` on one client.
+- **Rotate on rematch.** A rematch re-uses the same room and roster, so re-roll
+  the seed (or pass the lead to the previous round's loser/winner by an
+  explicit rule) — never let the same seat open every round of a session.
+- Announce it: "«Name» goes first" on the first screen after the waiting hall,
+  so the order reads as a fair roll rather than something the game did quietly.
+
+### Every turn-based game needs a grace clock (required)
+
+A phone that locks runs **no JavaScript**. Without a clock, one player putting
+their phone in their pocket freezes the table for everyone, forever. Ship all
+four pieces:
+
+1. **A per-turn deadline, not a countdown.** Store `turnDeadline = Date.now() +
+   TURN_SECONDS * 1000` and derive the displayed seconds from it every tick. A
+   tick-counting timer silently gains whatever time the WebView was suspended,
+   so a player could dodge their turn forever by backgrounding the app. On
+   resume just re-attach the interval — the deadline already moved on. Send the
+   deadline with the move (`action('move', {...})` → next turn's deadline) so
+   every client shows the same clock.
+2. **Freeze the clock while YOUR link is down, and give the time back.** On
+   `onDisconnect` stop the timer and remember `pausedAt`; on `onReconnected`
+   push `turnDeadline += Date.now() - pausedAt` and resume. A player must never
+   be auto-passed for seconds they could not play through. (Backgrounded but
+   still connected does NOT earn extra time.)
+3. **Timeout resolution with a proxy fallback.** The active player's own client
+   resolves its timeout first (auto-move / auto-pass). If that client is asleep
+   it can't, so after a further grace window (~10 s) a **single deterministic
+   client** — elected as "lowest-ranked present player that isn't the stalled
+   seat" — plays the forced move on their behalf and flags it (`auto: true`).
+   Electing exactly one prevents peers from forging each other's moves. A client
+   that did not witness the turn start (it just rebuilt from a sync) waits one
+   extra turn length before proxying.
+4. **A forfeit grace window on departure** (~20 s). Never fold a player the
+   moment `onPlayerLeft` fires — show "player left, waiting for them to
+   rejoin… (Ns)" and cancel the countdown if they rejoin. `onPlayerConnection`
+   `'reconnecting'` is NOT a forfeit; only `'gone'`/expired grace is. Track
+   pending departures per player id — more than one can drop inside one window.
+
+Real-time games need the same idea in a different shape: pause the simulation
+and show a "Reconnecting…" overlay driven by `onConnectionState`, and only
+declare a forfeit after the grace window.
+
+## Smoothness: 2+ players must never lag or glitch
+
+A game that plays perfectly solo and stutters with two players is failing the
+platform bar. The rules that keep relayed multiplayer smooth:
+
+- **Right channel for the job.** `realtime()` for anything per-frame
+  (positions, aim, physics snapshots) — fire-and-forget, never stored.
+  `action()` for turns and anything that must survive a reconnect — sequenced
+  and stored. Sending per-frame updates through `action()` floods the action
+  log, and rebuilding it on reconnect takes seconds.
+- **Fixed broadcast rate, decoupled from rendering.** The host steps the sim and
+  broadcasts at **15–20 Hz** on a timer; every client renders at 60 fps from
+  `requestAnimationFrame`. Never emit once per rendered frame, and never render
+  only when a packet arrives — that is exactly what "glitchy" looks like.
+- **Interpolate, don't snap.** Guests buffer snapshots and render ~100 ms in the
+  past with `Usion.game.createInterpolation`, or use
+  `Usion.game.replicate`/`replica` which does the delta-sync + interpolation for
+  you. Snapping remote entities straight to the last packet produces the
+  teleporting that players read as lag. For the local player use
+  `createPredictor` so your own input is instant.
+- **Small, capped payloads.** Send only what changed, round floats to 1–2
+  decimals, and cap input sends (a drag/pointermove listener that emits per
+  event will emit 120×/s). One state object per tick beats twenty tiny messages.
+- **Apply exactly once, idempotently.** Apply moves ONLY in `onAction`/
+  `onRealtime` — never optimistically on send *and* again on echo (that
+  double-applies and desyncs the boards). Dedupe by the authoritative
+  `sequence`; make every apply function safe to re-run after a resync.
+- **Never trust wall-clock comparisons across devices.** Phone clocks skew by
+  seconds; use the server-issued `sequence` to decide which state is newer.
+- **Keep the main thread free.** No per-frame DOM rebuilds, no layout thrash, no
+  synchronous work in the socket handler — buffer and drain on the next frame.
+  Pause the simulation while hidden and resync on return.
+- **Prove it under a bad network before shipping:**
+  `Usion.game.simulateNetwork({ latencyMs: 150, jitterMs: 60, lossPct: 5 })`.
 
 ## Reconnect contract (what the platform does on every disconnect)
 
@@ -209,6 +429,43 @@ The SDK handles recovery; your job is to stay idempotent and gate input:
   `onDisconnect`/`onReconnect` — nothing new to wire. For a connection
   indicator use `Usion.game.getNetworkStats()` /
   `Usion.game.onNetworkQuality(cb)` instead of hand-rolled ping loops.
+  The watchdog pauses while a mobile WebView is hidden and starts a fresh
+  liveness window on foreground or after a blocked main thread, so background
+  wall time never produces a false `liveness_timeout`.
+
+### Recovery watchdogs the reference games ship (add these)
+
+The SDK recovers from *events* it can see — a socket drop, a rejoin, a
+`visibilitychange`. Production taught us about the failures it can't see. Every
+one of these cost a real frozen match; they are cheap and silent in a healthy
+game:
+
+- **Mobile has no `visibilitychange`.** React Native WebViews do NOT fire it on
+  app background/foreground, so the web-only listener never runs inside the
+  Usion app. Detect the freeze from the wall clock instead: a 1 s heartbeat that
+  sees a >3 s jump means your JS was suspended → resync.
+- **Retry the resync until your sequence actually moves.** Right after a resume
+  the host socket may still be reconnecting, so a fixed burst of
+  `requestSync()` calls can all land in the dead window. Pump every ~1.2 s until
+  `lastSeq` advances (or a ~60 s deadline), then stop.
+- **Resync from YOUR last applied sequence** (`requestSync(lastSeq)`), not from
+  0 (re-walks the whole match) and not from the host checkpoint alone (it lacks
+  moves made while the host was backgrounded).
+- **Watch for your own echo going missing.** If your `action()` echo hasn't come
+  back after ~6 s, your UI is stuck waiting forever — request a catch-up.
+  Likewise, if you're waiting on *somebody else* and nothing at all has arrived
+  for ~20 s, ask for a sync. Debounce catch-ups (~5 s) so they never storm.
+- **Checkpoint from whoever just acted**, not only from the host. A host-only
+  `setState` goes stale the moment the host backgrounds: opponents' moves made
+  in that window are missing from the snapshot and get silently lost on
+  recovery. The actor always holds current state.
+- **A turn/phase staleness watchdog.** When a phase change rides fire-and-forget
+  `realtime` (turn advance, goal overlay), a single dropped packet leaves a
+  client stuck. Re-arm a ~3.5 s check that pulls the checkpoint
+  (`requestSync(lastSeq)` + a `request_state` broadcast) while the local view
+  says "waiting on someone else".
+- **Idempotent everything.** Resyncs are deduped but can still overlap;
+  restore-then-replay must be guarded by sequence so a repeat sync is a no-op.
 
 ## Smoother netcode (when 20 Hz state-blasting isn't enough)
 

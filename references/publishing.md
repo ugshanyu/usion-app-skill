@@ -74,6 +74,13 @@ Register body matches the Service Creator form: `{name, description, service_typ
 iframe_url, cost, tags, is_published, realtime?, max_players?, ...}`. A `bot`
 service also returns `bot_credentials` (token + webhook secret) once.
 
+**Guest access (web):** logged-out visitors can open free services from shared
+links by default and are asked to log in only when they try to save or send
+something (see "Guest visitors" in `sdk-reference.md`). If your app truly has
+no logged-out surface, register with `"guest_access": "none"` — the web then
+shows a login screen at the door instead of a half-working app. Omit the field
+(or `"full"`) to stay open; paid services are door-gated automatically.
+
 Token management endpoints (`POST/GET/DELETE /registry/api-tokens`) require a
 real login session — an API token cannot mint more API tokens (no escalation).
 
@@ -187,6 +194,21 @@ bundle to all iframes; npm publish is automated by
 `.github/workflows/publish-sdk.yml`.
 
 ## Live deployed exemplar apps (verified in seed scripts / repo)
+
+**Start here — «13» (Mongol Poker) is the reference game.** Live:
+https://13-phi-ten.vercel.app · Source (MIT):
+https://github.com/nelsuh/13 — three files, no build step
+(`index.html` + `script.js` + `style.css`), Path A style. It is the working
+implementation of every rule in
+[multiplayer.md](multiplayer.md): the `launchedSolo(config)` launch-mode split
+(GameTok → instant 4-player bots round; chat invite → waiting hall), the
+waiting hall with per-player READY + host start + seat order locked into the
+deal action, solo→host promotion via `onRoomAssigned`, the turn grace clock
+(wall-clock deadline, frozen while disconnected, elected proxy auto-move for a
+sleeping phone), 20 s forfeit grace, checkpoint-written-by-the-last-actor plus
+replay recovery, the resume/net watchdogs, leaderboard submit + Game Center,
+`reportResult` standings, and mn/en i18n. Read it before writing a
+multiplayer game; copy its structure rather than inventing one.
 
 Official reference games (seeded by `backend/scripts/seed_example_games.py`):
 
