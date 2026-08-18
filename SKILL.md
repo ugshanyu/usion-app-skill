@@ -120,6 +120,14 @@ Every one of these is how the platform's own games behave («13», Table Soccer,
 Mini Golf, Sequence, Ludo). Full detail in
 [references/multiplayer.md](references/multiplayer.md).
 
+0. **If the game could be played with other people, build it multiplayer** —
+   even when the request never says "multiplayer". Races, duels, quizzes,
+   board and turn-based games, anything where a second player makes it better:
+   ship the waiting hall + `Usion.game.invite()`. Only genuinely solo concepts
+   (endless runner, personal puzzle, drawing toy) stay single-player, and they
+   still submit scores so friends compete through the leaderboard. If the user
+   explicitly asked for multiplayer, it is required — never ship a solo
+   stand-in instead.
 1. **Two entry points, two behaviours.** Branch on
    `Usion.getLaunchParams().mode`, never on `roomId`:
    - `'single'` (GameTok / Explore) → **start playing instantly** vs bots or
@@ -163,6 +171,15 @@ Mini Golf, Sequence, Ludo). Full detail in
    auto-move on timeout, and a single elected client that plays for a stalled
    seat after a further grace window — a locked phone must never freeze the
    table.
+
+8. **Be GameTok-ready.** Published games land in GameTok, a full-screen swipe
+   feed, and in GameTok Party where a host swipes and everyone is dropped into
+   the same game together. That means: instant play on `mode: 'single'` (a
+   game that opens on a lobby is dead content in the feed); `onRoomAssigned`
+   handled so a solo session can be pulled into a shared room at any moment;
+   the whole viewport filled in portrait with one-thumb controls; as many
+   players as the rules allow (parties run to 16, extras are benched until the
+   next game); and a score submitted on every game over.
 
 ## Step 4 — Multiplayer (if applicable)
 
