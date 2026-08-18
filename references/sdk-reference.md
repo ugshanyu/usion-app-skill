@@ -562,8 +562,13 @@ reason for a player to come back.
 Service config (set at registration / publish):
 
 ```json
-"leaderboard": { "enabled": true, "order": "desc", "metric": "score", "max_score": 100000 }
+"leaderboard": { "enabled": true, "order": "desc", "mode": "best", "metric": "score", "max_score": 100000 }
 // order: "desc" = higher is better (default) · "asc" = lower is better (time trials, golf)
+// mode (optional): "best" (default) — the player's best result is kept forever ·
+//   "rating" — an ELO-style ladder: EVERY submission replaces the player's
+//   number, so it goes down when they lose. Rating boards are always ranked
+//   highest-first (`order` is ignored) and the hub labels them "rating", not
+//   "record". See "Rating boards" below.
 // metric (optional): "score" (default) · "level" — for a LEVEL-based game,
 //   submit the highest level reached as the score and set "level"; the Game
 //   Center hub then shows "Level 42" instead of a bare number.
@@ -574,16 +579,20 @@ Service config (set at registration / publish):
 An **AI Creator build has no service config to edit** — publishing reads the
 built code: calling `Usion.leaderboard.submit(...)` turns the leaderboard on,
 and `<meta name="usion:leaderboard" content="asc">` in the entry HTML declares
-that a lower score wins (times, strokes, moves). Higher-wins is the default.
+that a lower score wins (times, strokes, moves), while
+`<meta name="usion:leaderboard" content="rating">` declares an ELO-style ladder
+(see "Rating boards"). Higher-wins is the default.
 The config is set once at first publish and never overwritten afterwards, so a
 board that is already live can't be reshuffled by a re-publish.
 
 ```javascript
-Usion.leaderboard.submit(score, metadata?)  // Promise<{success, score, best, rank, updated}>
+Usion.leaderboard.submit(score, metadata?)  // Promise<{success, score, best, previous, rank, updated}>
 Usion.leaderboard.top({limit?})             // Promise<entries[]> — global, default 20
 Usion.leaderboard.friends({limit?})         // your accepted friends + you (powers Game Center)
 Usion.leaderboard.me()                      // Promise<{score, rank, total}>
+Usion.leaderboard.scores(userIds)           // SDK ≥2.28 — Promise<{userId: number|null}>, max 16 ids
 // entry: {user_id, name?, avatar?, score, rank, is_me, metadata?}
+// previous: what was on the board before this submit (null on a first submit)
 ```
 
 **What you get for free once `leaderboard.enabled` + you `submit()`** — no extra
@@ -619,6 +628,44 @@ renderRecords(friends);  // {name, avatar, score, rank, is_me} — highlight is_
 Submit only real, earned scores (the server keeps the best per player, so
 submitting every run is fine). `friends()`/`top()` are safe to call anytime
 after `Usion.init`.
+
+### Rating boards (`mode: "rating"`, SDK ≥ 2.28)
+
+For a **competitive game where players climb and fall** — chess, a 1v1 duel, any
+ladder — register the board with `"mode": "rating"`. The stored value is then the
+player's CURRENT rating, not their best ever: every `submit()` replaces it, so a
+loss actually takes them back down and past the friend who beat them.
+
+Your game computes the number; the platform stores and ranks it. Each player
+submits their OWN rating — you can never write someone else's, so both clients
+in a duel must submit (host-authoritative games: have each side submit after the
+host announces the result).
+
+```javascript
+const START = 1200, K = 32;
+const [mine, theirs] = await Promise.all([
+  Usion.leaderboard.me(),
+  Usion.leaderboard.scores([opponentId]),      // read the opponent's rating
+]);
+const my = mine.score ?? START;
+const their = theirs[opponentId] ?? START;
+const expected = 1 / (1 + Math.pow(10, (their - my) / 400));
+const actual = won ? 1 : (draw ? 0.5 : 0);
+const r = await Usion.leaderboard.submit(Math.round(my + K * (actual - expected)));
+showDelta(r.best - (r.previous ?? START));     // "+18" / "−14"
+```
+
+Rules that keep a ladder honest:
+
+- **New players start at a fixed rating** (1200 is the convention). `me().score`
+  is `null` until their first submit, and `scores()` reports `null` for anyone
+  not on the board — treat both as the starting rating.
+- **Submit once per match, from a settled result.** A rating board has no
+  "best kept" safety net: a duplicate submit is a duplicate rating change.
+- **Only a rating that goes UP notifies anyone.** A drop is stored silently — it
+  beat nobody.
+- Pair it with `Usion.game.reportResult(...)` (below) so the match itself also
+  lands in the chat it started from.
 
 ### Match result cards (`Usion.game.reportResult`, SDK ≥ 2.26)
 
