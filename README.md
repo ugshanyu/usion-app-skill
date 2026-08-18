@@ -39,6 +39,7 @@ Real, deployed apps to study — each demonstrates a different SDK pattern:
 | [usion-contra-p2p](https://github.com/ugshanyu/usion-contra-p2p) | [contra-p2p-production.up.railway.app](https://contra-p2p-production.up.railway.app) | Browser-to-browser P2P WebRTC co-op, platform signaling only |
 | [space-craft-v2](https://github.com/ugshanyu/space-craft-v2) | [space-craft-v2-production.up.railway.app](https://space-craft-v2-production.up.railway.app) | 4-player server-authoritative shooter, dual transport, lag compensation |
 | [space-craft-standalone](https://github.com/ugshanyu/space-craft-standalone) | — | Standalone-mode game (own socket, no host iframe) |
+| [usion-racing](https://github.com/ugshanyu/usion-racing) | [usion-racing.vercel.app](https://usion-racing.vercel.app) | 2–4p 3D truck racing (three.js + crashcat) over the platform relay — client-simulated cars, 15 Hz snapshots, symmetric collision impulses, waiting hall, best-lap board (asc) |
 | [usion-xo-platform](https://github.com/ugshanyu/usion-xo-platform) | [usion-xo-platform.vercel.app](https://usion-xo-platform.vercel.app) | XO 8×8 (5-in-a-row) platform-mode game |
 | [mongolgpt-studio](https://github.com/ugshanyu/mongolgpt-studio) (private) | [kling-studio.vercel.app](https://kling-studio.vercel.app) | Content-creation app: AI video/image generation, wallet billing, share-to-feed |
 
