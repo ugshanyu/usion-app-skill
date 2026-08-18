@@ -4,50 +4,6 @@ The platform owns rooms, matchmaking, invites (`game_invite` chat flow), and
 the transport. Your game owns the rules, the simulation, and the rendering.
 Never rebuild room codes, invite/share UIs, matchmaking UIs, or wager pickers.
 
-## Build it multiplayer whenever the game could be played with someone
-
-**If the game you were asked for could plausibly be played against or with
-other people, build it multiplayer — even when the request never says
-"multiplayer".** Usion is a chat app: a game that friends can play together is
-the product, and a solo-only build throws that away.
-
-Apply it like this:
-
-- **Could two or more people play?** — a race, a duel, a quiz, a board game,
-  taking turns, comparing scores in the same round → **multiplayer**, with the
-  waiting hall and `Usion.game.invite()`.
-- **Genuinely single-player only** — an endless runner, a personal puzzle, a
-  one-hand solitaire, a drawing toy → keep it solo, and still submit scores so
-  friends compete through the leaderboard and Game Center.
-- Multiplayer NEVER replaces instant solo play. Every game must still start
-  instantly on its own from the feed (see the table below); the multiplayer
-  path is what happens when a friend is invited.
-- If the user explicitly asks for solo, keep it solo. If the user explicitly
-  asks for multiplayer, it is required — never ship a solo stand-in and call
-  it done.
-
-### GameTok-ready (every game lands in the swipe feed)
-
-Published games appear in **GameTok**, a full-screen swipe feed, and in
-**GameTok Party**, where a host swipes and everyone in the party is dropped
-into the same game together. A game is GameTok-ready when:
-
-1. **It plays instantly on `mode: 'single'`** — the feed opens straight into
-   the game. No menu, no "Play" button, no waiting screen. A game that opens
-   on a lobby is dead content in the feed.
-2. **It accepts being pulled into a shared room at any moment.** In a party,
-   members join the SAME game as the host, so `onRoomAssigned` can fire on a
-   session that started solo: tear down the solo round and open the waiting
-   hall as host (already the rule for the Share button).
-3. **It fills the screen in portrait** — one game occupies the whole viewport,
-   no horizontal scrolling, controls reachable with one thumb.
-4. **It supports as many players as its rules allow** (`max_players`): parties
-   run up to 16 people, and anyone beyond a game's limit is benched until the
-   next game. A 2-player-only game works, but a game that scales to 4-8 gets
-   played far more.
-5. **It submits a score on every game over**, so the round produces a record
-   and a rematch hook (see the leaderboard/Game Center rules).
-
 ## The required shape of a Usion game (read this first)
 
 A game is opened from two completely different places, and the platform expects
