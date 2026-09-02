@@ -151,6 +151,9 @@ Mini Golf, Sequence, Ludo). Full detail in
    `leaderboard: {enabled: true, order}` on the service and `submit()` on game
    over; show `Usion.leaderboard.friends()` + `top({limit:10})` on the
    game-over screen. No number? Submit wins, best time, or level reached.
+   Level-based game? The board value is the player's LAST state — register
+   `metric: "level"` and submit the level they are currently on every time it
+   changes, not a per-run score.
    Report match outcomes with `Usion.game.reportResult({winnerId, ...})` so the
    result card lands back in the chat the game was started from.
 5. **2+ players must not lag or glitch.** Host broadcasts at 15–20 Hz on a
@@ -180,6 +183,18 @@ Mini Golf, Sequence, Ludo). Full detail in
    the whole viewport filled in portrait with one-thumb controls; as many
    players as the rules allow (parties run to 16, extras are benched until the
    next game); and a score submitted on every game over.
+
+9. **A game is not a web page — nothing in it is selectable or zoomable.**
+   Long-press must not raise text-selection handles or the copy callout,
+   double-tap must not zoom, a swipe must not rubber-band the page, and taps
+   must not flash a grey highlight. Ship the reset (`user-select: none`,
+   `-webkit-touch-callout: none`, `-webkit-tap-highlight-color: transparent`,
+   `touch-action: manipulation`, plus `user-scalable=no` and
+   `overscroll-behavior: none`), `touch-action: none` + a non-passive
+   `preventDefault()` on the play surface so drags aren't eaten by scrolling,
+   and `draggable="false"` on images/canvas. Leave selection ON only for text
+   the player may want to read or copy (rules, chat, results). See the SDK
+   reference → "A game is not a web page".
 
 ## Step 4 — Multiplayer (if applicable)
 

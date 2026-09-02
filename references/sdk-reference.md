@@ -570,8 +570,8 @@ Service config (set at registration / publish):
 //   highest-first (`order` is ignored) and the hub labels them "rating", not
 //   "record". See "Rating boards" below.
 // metric (optional): "score" (default) · "level" — for a LEVEL-based game,
-//   submit the highest level reached as the score and set "level"; the Game
-//   Center hub then shows "Level 42" instead of a bare number.
+//   submit the player's CURRENT level (their last state, see below) and set
+//   "level"; the Game Center hub then shows "Level 42" instead of a bare number.
 // max_score (optional): scores beyond this still record but never fire record
 //   notifications — a plausibility guard against forged scores.
 ```
@@ -628,6 +628,29 @@ renderRecords(friends);  // {name, avatar, score, rank, is_me} — highlight is_
 Submit only real, earned scores (the server keeps the best per player, so
 submitting every run is fine). `friends()`/`top()` are safe to call anytime
 after `Usion.init`.
+
+### Level-based games: submit the player's last state
+
+If the game is a **progression** game — levels, stages, worlds, chapters — the
+number on the board is not a per-run score: it is **where the player currently
+is**, i.e. their last state. Register the board with `"metric": "level"` and
+`submit()` the level they are now on **every time it changes** (level cleared,
+run resumed, save loaded), not only on a game-over screen — a progression game
+may never show one.
+
+```javascript
+// whenever the player advances — and once on load, after restoring the save
+async function syncProgress(level) {
+  await Usion.leaderboard.submit(level);   // the level they are ON, not a run score
+}
+```
+
+Because progress only moves forward, the default `"best"` mode already stores
+exactly that last state: replaying an easy level can never knock a player back
+down the board, and the hub always reads "Level 42" for where they really are.
+Do NOT submit a per-run score, points, or the level count of a single session
+on a `"level"` board — friends compare progress, so the value has to mean the
+same thing for everyone.
 
 ### Rating boards (`mode: "rating"`, SDK ≥ 2.28)
 
@@ -902,6 +925,50 @@ Usion.selectionGrid(containerSel, itemSel, onChange)  // → {getSelected(), cle
 ```
 
 Design tokens: `https://usions.com/usion-design-system.css`.
+
+### A game is not a web page: kill selection, zoom and rubber-band
+
+Mini-apps run in an iframe on web and a **WebView on mobile**, where every
+default browser gesture is still live. A tap-and-hold on a game piece pops the
+text-selection handles and the copy/"Look up" callout, a fast double-tap zooms
+the board, a swipe rubber-bands the whole surface, and every tap flashes a grey
+highlight box. It reads as a broken web page instead of a game, and it breaks
+drag controls outright — the selection gesture eats the drag.
+
+Put this in the entry HTML of **every game** (and any app with drag/tap
+controls). It costs four lines and there is no case where a game wants the
+defaults:
+
+```html
+<meta name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1,
+               user-scalable=no, viewport-fit=cover">
+```
+
+```css
+html, body {
+  height: 100%;
+  overflow: hidden;                 /* no page scroll behind the game */
+  overscroll-behavior: none;        /* no pull-to-refresh / rubber-band */
+}
+* {
+  -webkit-user-select: none; user-select: none;   /* NOT selectable */
+  -webkit-touch-callout: none;                    /* no long-press callout */
+  -webkit-tap-highlight-color: transparent;       /* no grey tap flash */
+  touch-action: manipulation;                     /* no double-tap zoom */
+}
+/* Text the player must be able to select or type into stays selectable. */
+input, textarea, [contenteditable] { -webkit-user-select: text; user-select: text; }
+```
+
+- On the **play surface itself** (canvas or board container) use
+  `touch-action: none` so a drag never turns into a scroll, and call
+  `e.preventDefault()` in your `touchmove` handler (register it with
+  `{passive: false}` — a passive listener cannot prevent the scroll).
+- Mark images and canvases `draggable="false"`; a long-press otherwise offers
+  "Save image".
+- Keep it OFF for genuinely readable content — a rules screen, a chat log, a
+  result the player may want to copy. Selection is a feature there.
 
 ## Backend channel
 
