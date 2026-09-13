@@ -71,8 +71,15 @@ POST   {API_URL}/registry/services/my/{id}/notify-secret   # mint/rotate notify 
 ```
 
 Register body matches the Service Creator form: `{name, description, service_type,
-iframe_url, cost, tags, is_published, realtime?, max_players?, ...}`. A `bot`
+iframe_url, cost, tags, is_published, realtime?, max_players?, genre?, ...}`. A `bot`
 service also returns `bot_credentials` (token + webhook secret) once.
+
+**Explore category (games):** `genre` is `strategy` (think: puzzle, cards,
+board, turn-based, quiz) or `action` (react: shooters, racing, arcade, sports,
+reflex). It picks the game's category row on Explore; the other rows — Most
+played, Trending, New games, Best multiplayer games — are computed from usage,
+live players, publish date and the `multiplayer` tag. Omit it and the platform
+infers one from the tags and name when it can; set it explicitly to be sure.
 
 **Guest access (web):** logged-out visitors can open free services from shared
 links by default and are asked to log in only when they try to save or send
@@ -159,7 +166,7 @@ Body    {"user_id": "...", "title": "...", "body": "...", "path": "/optional/in-
   write-only thereafter (every read excludes it), so store it in your backend's
   env (e.g. `USION_NOTIFY_SECRET`) when you get it. Three ways to obtain one:
   - **Creator path** (`usk_live_…` key): auto-minted when you register via
-    `POST /services` (returned once as `signing_secret`); the AI Creator publish
+    `POST /services` (returned once as `signing_secret`); the Mini App Creator publish
     flow mints one too. Lost it? Rotate (owner-only):
     `POST /services/{id}/signing-secret/rotate` → fresh `signing_secret`, old one
     dies immediately.
@@ -234,6 +241,7 @@ Other production deployments:
 | Random Chat | https://random-chat-production-31c3.up.railway.app | `microservices/random-chat/` |
 | UsionFlow mini-app | https://app.mongolgpt.mn/miniapp | `backend/scripts/seed_usionflow_miniapp.py` |
 | **Flappy** (friends leaderboard reference) | https://usion-flappy.vercel.app | https://github.com/ugshanyu/usion-flappy · seed `backend/scripts/seed_flappy_bird.py` — single-player arcade game and the reference for `Usion.leaderboard`: submits on game over, shows accepted-friends records via `leaderboard.friends()`, and its seed sets `leaderboard: {enabled: true, order: "desc"}` on the service doc (the gate for the `lb:*` channel). Static single file on Vercel (Path B, loads the SDK itself). |
+| **Beat Steps** (rhythm / DDR-style, solo + leaderboard) | https://usion-beat-steps.vercel.app | https://github.com/ugshanyu/usion-beat-steps · seed `backend/scripts/seed_beat_steps.py` — four-lane arrow rhythm game built from written scores: `chart.js` turns a score's melody line into arrows (lane from pitch contour, three difficulties by beat grid + minimum gap), `judge.js` holds the timing windows / combo / life / grades (both pure and unit-tested), and `audio.js` is a Web Audio synth whose clock IS the game clock (output latency subtracted, song rebased after a frozen-WebView pause). Seven public-domain classical pieces generated from MIDI, no recordings. Vanilla ES modules, no build step, en/mn. |
 | **Quiz Party** | https://quiz-party-production.up.railway.app | https://github.com/ugshanyu/usion-quiz-party · seed `backend/scripts/seed_quiz_party.py` — quiz platform registered as a SERVICE (no game tags) that still runs live multiplayer over the platform relay: rooms/lobby work because the seed persists `game_config` + `realtime` directly (room APIs never re-check tags). Kahoot-style host-authoritative sessions via sequenced `action()`s + `realtime()` answers, `Usion.lobby` join codes, scoped-token auth via `/iframe/verify-token`, and service-scoped iframe tokens on the room REST APIs. |
 
 SDK + design system:

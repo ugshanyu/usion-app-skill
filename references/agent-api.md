@@ -3,7 +3,7 @@
 A creator can let their **AI agent** create and manage Usion services
 autonomously by handing it a **creator API key**. The agent drives the creator
 REST API with `Authorization: Bearer <key>` — no human in the loop, no expiring
-session. This is the agent-friendly alternative to the in-chat AI Creator bot.
+session. This is the agent-friendly alternative to the in-chat Mini App Creator bot.
 
 Base URL `{API_URL}` = the Usion backend (e.g. `https://mobile.mongolai.mn`).
 

@@ -21,7 +21,7 @@ If anything here disagrees with the source, the source wins.
 6. [Chat](#chat) · [Bot](#bot)
 7. [Results, sharing, misc root methods](#results-sharing-misc)
 8. [Hybrid tabbed services](#hybrid-tabbed-services-sdk--225)
-9. [UI utilities](#ui-utilities)
+9. [UI utilities](#ui-utilities) · [Screen capture guard](#screen-capture-guard-sdk--231)
 10. [Backend channel & allowlist](#backend-channel)
 11. [Error model](#error-model-sdk--222)
 12. [APIs that DO NOT exist](#apis-that-do-not-exist)
@@ -133,9 +133,38 @@ you normally just call `Usion.game.connect()`.
 Usion.user.getId()      // string|null  (sync)
 Usion.user.getName()    // string|null
 Usion.user.getAvatar()  // string|null
+Usion.user.isAdult()    // true | false | null   (sync, SDK >=2.29)
 Usion.user.getToken()   // JWT for socket connections (used internally)
-Usion.user.getProfile() // Promise<{id, name, avatar}>
+Usion.user.getProfile() // Promise<{id, name, avatar, isAdult}>
 ```
+
+### Age gating (`isAdult`)
+
+The platform tells you **whether** the user is 18+ and nothing else — you never
+receive a birth date or an exact age, and there is no `isOver(n)`. Age-gate on
+this one bit.
+
+`null` means unknown: a logged-out guest, or an account with no birth date on
+file. `null` is falsy, so the natural gate already fails closed:
+
+```javascript
+if (!Usion.user.isAdult()) {
+  showAgeGate();   // blocks minors AND unknown visitors
+  return;
+}
+```
+
+Do not treat `null` as "probably fine". If your app has an 18+ mode, an unknown
+user gets the safe version of it.
+
+**This check is client-side.** Anyone can edit the page. If the gate protects
+something that actually matters (paid adult content, a legal requirement), your
+own server must verify it: send the iframe token to
+`POST /iframe/verify-token`, whose response carries the same `is_adult` flag
+alongside `user_id`. Trust that, not the browser.
+
+Nothing is asked of the user for this — it is derived from the birth date they
+gave at sign-up, so there is no prompt and no permission to request.
 
 ## Wallet
 
@@ -576,7 +605,7 @@ Service config (set at registration / publish):
 //   notifications — a plausibility guard against forged scores.
 ```
 
-An **AI Creator build has no service config to edit** — publishing reads the
+An **Mini App Creator build has no service config to edit** — publishing reads the
 built code: calling `Usion.leaderboard.submit(...)` turns the leaderboard on,
 and `<meta name="usion:leaderboard" content="asc">` in the entry HTML declares
 that a lower score wins (times, strokes, moves), while
@@ -781,8 +810,9 @@ name but a generic body ("Sent you a message"), never decrypted content.
 
 Ask the user before using a capability — the same way you ask for money. The host
 shows a modal; the user **allows or cancels**. The user can later change any grant
-in the Usion app's settings for your app. SDK ≥ 2.17. First permission:
-`notifications`. Backend: per-user-per-service grants in `service_permissions`.
+in the Usion app's settings for your app. SDK ≥ 2.17 supports `notifications`;
+SDK ≥ 2.30 adds `profile_content` for native profile cards (see below).
+Backend: per-user-per-service grants in `service_permissions`.
 
 ```javascript
 Usion.permissions.request(['notifications'], { reason? })  // Promise<{granted, permissions}>
@@ -799,6 +829,67 @@ Usion.permissions.has('notifications')                     // Promise<boolean>
   iframe — `request` just shows the modal.
 - **Embedded feature.** Standalone (outside the Usion app) there's no modal;
   `request`/`query` resolve "not granted" and the user manages grants in-app.
+
+## Screen capture guard (SDK ≥ 2.31)
+
+Mark a short window as **secret** — the moment your app shows something a
+screenshot would ruin (a memory game's pattern, a hidden hand of cards, a
+one-time code). The platform blocks the capture where the OS allows it and
+reports it where it doesn't, so you react instead of being cheated silently.
+
+```javascript
+Usion.screen.protect(true)          // this screen is secret
+Usion.screen.protect(false)         // it isn't any more — ALWAYS pair this
+Usion.screen.onCapture(cb)          // cb({ kind: 'screenshot' }) -> unsubscribe fn
+Usion.screen.support()              // sync -> { block: boolean, detect: boolean }
+```
+
+| Platform | While protected |
+|---|---|
+| Android app | Screenshot and screen recording **blocked** by the OS (`block: true`). `onCapture` never fires — there is nothing to report |
+| iOS app | The OS gives no way to block a screenshot, so it is **detected** and `onCapture` fires (`detect: true`) |
+| Web browser | Neither is possible (`{ block: false, detect: false }`) — see the honesty rule below |
+
+### The rules that make this work
+
+- **Protect the secret window, not your app.** Turn it on when the secret is on
+  screen and off the instant it leaves. Protection that stays on blocks the
+  user's screenshots of their own scores, leaderboards and share cards — which
+  they rightly expect to work. Release it on every exit path (finished, failed,
+  timed out, backgrounded, unmounted), not just the happy one.
+- **Neutralize, never punish.** On `onCapture`, invalidate what leaked —
+  re-shuffle the board, re-draw the pattern, rotate the code — and say something
+  neutral ("pattern refreshed"). Do NOT end the turn, deduct points, or accuse
+  the player: iOS reports AirPlay mirroring and screen recording as capture too,
+  and people take accidental screenshots. An honest player must feel nothing
+  worse than a small do-over.
+- **Never a security control.** Web players can't be detected at all, and no
+  platform can stop a second phone pointed at the screen. If your app is only
+  fair *because* capture is blocked, it is already unfair on the web — fix that
+  in the design (don't render the whole solution in one frame), not here.
+- **Don't fake what the platform can't do.** Never substitute blur/visibility/
+  keypress guessing for real detection; a false accusation is worse than a
+  missed one. Use `support()` to decide your fallback design, and remember an
+  older app binary correctly reports `{ block: false, detect: false }`.
+- Both calls are safe no-ops standalone and on hosts that don't support them —
+  guard nothing, but expect nothing either.
+
+```javascript
+// Memory game: the solution is only visible during the preview phase
+function showPattern() {
+  paintTargets();
+  Usion.screen?.protect(true);
+}
+function hidePattern() {
+  Usion.screen?.protect(false);   // recall board, results and leaderboard stay capturable
+  clearTargets();
+}
+Usion.screen?.onCapture(() => {
+  if (phase !== 'preview') return;     // a screenshot of the dark board is worthless
+  startRoundAgain();                   // the captured pattern is now dead
+  setStatus(t('patternRefreshed'));    // neutral wording, no accusation
+});
+```
 
 ## Notify
 
@@ -828,16 +919,26 @@ Usion.notify.isMuted()                     // Promise<boolean>
 - **Server-triggered** (job finishes while the app is closed): your own backend
   calls the signed `POST /services/{id}/notify` — see `references/publishing.md`.
 
-## Results, sharing, misc
+## Results, file export, and sharing
 
 ```javascript
 Usion.saveResult(data, {thumbnail_url?, title?, type?})  // server-persisted, Promise<SavedResult>
 Usion.deleteResult(resultId)
 Usion.getResults()                   // SavedResult[] from init config
 
-Usion.share(contentType, data)       // 'audio'|'image'|'video'|'text'|'mixed'; native share sheet
+Usion.share(contentType, data)       // platform share UI; external action attaches its first media item
+Usion.shareFile(url, {               // SDK >= 2.29; actual file attachment to another app
+  filename?, mimeType?, title?, text?
+})                                   // Promise<{success, destination, cancelled?, fallback?}>
+Usion.shareToStory(url, {            // SDK >= 2.32; straight onto an IG story
+  filename?, mimeType?, stickerUrl?,
+  backgroundTopColor?, backgroundBottomColor?
+})                                   // Promise<{success, destination, fallback?}>
 Usion.shareToFeed(contentType, data) // Promise<{success, postId?, shareUrl?}>
-Usion.download(url, filename?)       // save to device/gallery
+Usion.download(url, filename?, {     // SDK >= 2.29
+  destination: 'auto'|'gallery'|'files',
+  mimeType?, title?
+})                                   // Promise<{success, destination, cancelled?}>
 
 Usion.submit(data)                   // finish with results; host closes the app
 Usion.exit({backCount?})             // close the mini-app
@@ -850,6 +951,62 @@ Usion.getTheme()                     // 'light'|'dark'
 Usion.getLanguage()                  // e.g. 'en', 'mn'
 Usion.claimBackButton(cb) / Usion.releaseBackButton()
 ```
+
+Use the host file APIs for exports—never rely on an iframe `<a download>`,
+`window.open`, or direct `navigator.share`. Those bypass the native mobile host
+and behave differently across browsers.
+
+```javascript
+// Attach a PDF to WhatsApp, Telegram, Mail, AirDrop, etc.
+await Usion.shareFile(reportUrl, {
+  filename: 'trip-report.pdf',
+  mimeType: 'application/pdf',
+  title: 'Share trip report'
+});
+
+// Images/videos go to the gallery in auto mode.
+await Usion.download(posterUrl, 'poster.png', {
+  destination: 'auto',
+  mimeType: 'image/png'
+});
+
+// Documents, archives, audio, and other materials go to Files/Downloads.
+const saved = await Usion.download(csvUrl, 'scores.csv', {
+  destination: 'files',
+  mimeType: 'text/csv'
+});
+if (!saved.success && saved.cancelled) return; // user closed the picker
+```
+
+File-transfer rules:
+
+- Call `shareFile`/`download` directly from a visible user tap. OS and browser
+  pickers may be blocked when opened automatically or after a long async chain.
+- Pass a public `https://` URL whenever possible. Base64 `data:` URLs work up to
+  10 MB for locally generated canvas/text exports. Mobile cannot read an iframe
+  `blob:` URL; convert a small Blob to a data URL or upload it and pass HTTPS.
+- Remote transfers are capped at 100 MB. Any file type goes through: the host
+  recognizes common image, audio, video, document, archive, font, and text
+  formats from the filename extension, and carries anything else as opaque
+  bytes with its name intact. Still pass an explicit `filename` and `mimeType`
+  when you know them — that is what decides which apps the share sheet offers.
+- `destination: 'auto'` sends images/videos to the gallery and everything else
+  to Files/Downloads. `gallery` rejects non-image/video MIME types. On iOS,
+  arbitrary-file download opens the system sheet where the user chooses **Save
+  to Files**. On Android it opens a directory picker. On web, unsupported binary
+  Web Share falls back to sharing the URL or downloading the file; check
+  `result.fallback` if the distinction matters.
+- `Usion.shareToStory(imageUrl)` opens Instagram's story composer with your
+  image already on the canvas, and carries the "Play on Usions" attribution chip
+  back to the platform. It is safe to call anywhere: on the web, on an older app
+  build, or when Instagram is not installed it falls back to the ordinary share
+  sheet and sets `fallback: true`, so never branch on platform yourself. Images
+  only — a 1080x1920 export is the right shape. The chip needs the platform's
+  Facebook App ID to be configured; without it you still get the normal share.
+- `Usion.share` remains the user-facing platform share flow (Usions contacts,
+  service attribution, then an external action). Use `shareFile` when the button
+  specifically means “send this file to another app.” Use `shareToFeed` only for
+  a signed-in user's attributed Usions feed post.
 
 ### Back button: the claim is ONE-SHOT — re-claim per screen
 
@@ -1019,3 +1176,54 @@ Common hallucinations the platform's quality checker flags as
 - `Usion.game.emit` → use `Usion.game.action()` or `Usion.game.realtime()`
 - `Usion.on(...)` for socket events in embedded mode → it only receives host
   postMessages; use `Usion.game.on*` handlers instead.
+
+## Profile content (SDK 2.30+)
+
+Profile starts with **Record** (selected by default), then **Right now**, then
+one category per app with content and an explicit `profile_content` grant.
+The app category uses its registered name. Signed-in profile visitors can see
+its cards, subject to blocking; Right now retains its existing audience rules.
+
+Ask after a user taps a clearly labeled action such as “Show on my profile”:
+
+```js
+const consent = await Usion.permissions.request(['profile_content'], {
+  reason: 'Show your artwork in this app’s category on your profile.',
+});
+if (consent.permissions.profile_content) {
+  await Usion.profile.setContent({
+    items: [{
+      id: 'artwork-1',
+      title: 'My latest artwork',
+      description: 'Made with Drawing Studio',
+      imageUrl: 'https://your-cdn.example/artwork-1.png',
+    }],
+  });
+}
+```
+
+- `Usion.profile.getContent()` returns `{ items }` for this app and the current
+  user only. Requires the grant.
+- `Usion.profile.setContent({ items })` replaces this app’s complete list and
+  returns the saved `{ items }`. It never requests permission automatically.
+- `Usion.profile.clearContent()` removes the app’s content and resolves void.
+  Cleanup is allowed after revocation too. Publishing `items: []` also hides
+  the category but retains permission.
+- Up to 50 cards: unique `id` (1–80 letters/digits/underscores/hyphens), `title`
+  (1–120 characters), optional plain-text `description` (≤2,000), optional
+  HTTPS `imageUrl` (≤2,048, no credentials). Upload images first. HTML,
+  scripts, embedded frames, custom links and arbitrary extra fields are rejected.
+  Card taps open the originating app in Usion.
+- `PERMISSION_DENIED` means consent is missing or revoked. Check
+  `Usion.permissions.has('profile_content')` without prompting, and handle
+  denial gracefully. Cancellation never publishes content.
+- Only a published app with a live grant and nonempty content appears on the
+  profile. Revocation in Settings or “Remove from profile” hides it and prevents
+  further publishing. Existing stored content can reappear if access is granted
+  again; use `clearContent()` to delete it.
+- This is the stable **v2** SDK API. It requires updated web/mobile hosts and
+  backend. Older hosts reject after the 30-second request timeout; standalone
+  pages reject with `UNSUPPORTED`. Never fall back to silently publishing.
+- The host binds the signed-in user and current service. Mini-apps cannot select
+  another owner or service, grant themselves access, or read Record/Right now
+  data through this API. Existing leaderboard APIs continue to supply Record.

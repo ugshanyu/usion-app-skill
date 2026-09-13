@@ -106,7 +106,14 @@ Quick map of what the platform offers (full signatures in the SDK reference):
 - **Chat integration**: `Usion.chat.sendMessage/createPersonalChat`, `Usion.bot.*` for inline bot widgets
 - **Permissions**: `Usion.permissions.request(['notifications'])` shows a host modal (allow/cancel); `query`/`has` read state without prompting. Capabilities are platform-enforced — **ask before you act**. Users manage grants later in app settings. First permission: `notifications`. (SDK ≥ 2.17)
 - **Notifications**: `Usion.notify.send({title, body, path?})` notifies the app's own user (in-app banner online / OS push offline); tapping reopens the app at `path` (read via `Usion.getLaunchParams().path`). **Call `Usion.permissions.request(['notifications'])` first** — without a grant, `send` returns `delivered:'blocked'` (existing/already-published apps are grandfathered). The notification's **title is always your mini-app's name** — your `title`/`body` become the message; don't repeat the app name in `title`. `setMuted`/`isMuted` for opt-out. Server-triggered: signed `POST /services/{id}/notify`
-- **Results & sharing**: `Usion.saveResult`, `Usion.share`, `Usion.shareToFeed`, `Usion.download`
+- **Screen capture guard**: `Usion.screen.protect(true/false)` marks a short window as secret (a memory pattern, a hidden hand, a one-time code): Android blocks the screenshot outright, iOS can't block so `Usion.screen.onCapture(cb)` reports it, web can do neither — `Usion.screen.support()` tells you which. Protect ONLY the secret moment and always turn it back off (a stuck guard blocks the user's own score/leaderboard screenshots). On a capture, **neutralize — re-draw what leaked and say something neutral — never punish**: iOS reports AirPlay mirroring too and accidents happen. Never a security guarantee (web is undetectable, and a second phone always works). (SDK ≥ 2.31)
+- **Results, export & sharing**: `Usion.saveResult`; `Usion.share` for the
+  platform share UI; `Usion.shareFile` for a real attachment in WhatsApp,
+  Telegram, Mail, etc.; `Usion.download` for Gallery or Files/Downloads;
+  `Usion.shareToFeed` for an attributed Usions post. Use the host APIs—not an
+  iframe `<a download>`, `window.open`, or direct `navigator.share` call—so the
+  same action works in the mobile WebView and on web. See the SDK reference
+  “Results, file export, and sharing” section.
 - **Lifecycle/UI**: `Usion.exit()`, `Usion.claimBackButton(cb)`, `Usion.setLoading`, `Usion.toggle`, theme/language getters
 
 Backend-channel modules (lobby `lobby:*`, matchmaking `mm:*`, leaderboard
@@ -230,12 +237,15 @@ Read [references/multiplayer.md](references/multiplayer.md). The core contract:
   `Usion.user.info`) — the platform's quality checker will flag them.
 - Cloud KV end-to-end: `cd backend && python -m scripts.test_cloud_kv`.
 - Notifications end-to-end: `cd backend && python -m scripts.test_notifications`.
+- For an app that exports files, test one media download, one document download,
+  share cancellation, and the web fallback. File/share methods must be called
+  from a visible user tap so browsers and mobile OSes allow the picker.
 
 ## Step 6 — Publish
 
 Read [references/publishing.md](references/publishing.md) for the exact flow.
 Summary: Path A bundles deploy to S3 (`miniapps/apps/<project>/v<n>`) and
-register automatically via the AI Creator publish flow; Path B microservices
+register automatically via the Mini App Creator publish flow; Path B microservices
 deploy to Vercel/Railway and register via a seed script following
 `backend/scripts/seed_example_games.py`. Capability tags (`game`,
 `multiplayer`) are detected from the BUILT code — a multiplayer game that never
