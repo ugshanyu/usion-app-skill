@@ -795,6 +795,14 @@ Usion.game.reportResult({
   Connect Four).
 - Bot/AI seats are dropped (only real users are messaged), so a "you vs 3 bots"
   game produces no card at all.
+- **Reporting a result ENDS the room.** The platform marks it `finished`, clears
+  everyone's "Playing X" presence and flips the invite card in the chat from
+  "Rejoin" to "View results". Players already in the room keep relaying actions
+  (a rematch inside the same room still works), but the room is no longer a
+  matchmaking target and new players join it through the room's own invite. So
+  call it at MATCH end, not at the end of every round of a best-of-three.
+- Each card is stored for 30 days as well as emitted live, so a player who was
+  offline (or reconnecting) when you reported still finds it in the DM.
 
 ## Chat
 
