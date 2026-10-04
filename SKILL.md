@@ -28,6 +28,22 @@ global object: `window.Usion`.
 | [references/publishing.md](references/publishing.md) | You're deploying/registering the app — hosting paths, service registry, and links to live deployed exemplar apps |
 | [references/agent-api.md](references/agent-api.md) | You're an AI agent registering/managing services via the REST API with a creator API key — auth, `POST /services`, capturing the one-time signing secret, rotating it |
 
+For game UI, apply [Minimal game UI inside Usions](references/sdk-reference.md#minimal-game-ui-inside-usions): reuse the host header and prioritize a large playfield with minimal text and controls. This reference is also mirrored into AI Creator’s system prompt.
+
+## Game defaults: play first, say less
+
+Use the least visible text that makes the next action clear. Start solo play
+immediately; keep settings/help behind a compact top control. Use short action
+labels, large touch targets, and a full-width primary action on simple round
+screens. A multiplayer invite opens a waiting room, not another solo session.
+At the end show compact earned results and Restart: Friends/Global records for
+solo, actual participant standings for multiplayer. Save at the terminal game
+state and verify the backend acknowledgment before claiming a record was saved.
+
+Read [game flow, scoring, and result persistence](references/sdk-reference.md#game-flow-scoring-and-result-persistence)
+when building or changing a game. Verify these flows in both the web iframe and
+native WebView before publishing. Preserve explicit user choices over defaults.
+
 ## Step 1 — Decide the delivery path
 
 There are two ways an app reaches users. Pick one first; it changes everything
@@ -143,7 +159,7 @@ Mini Golf, Sequence, Ludo). Full detail in
    - A solo round can be promoted mid-session (host's Share button): register
      `Usion.game.onRoomAssigned` up front, tear down the bot round, show the
      waiting hall.
-2. **Multiplayer games have a waiting hall.** Present players with avatars, a
+2. **Multiplayer games have a waiting hall before play and rematches.** Present players with avatars, a
    READY toggle each, host-only Start enabled once everyone present is ready
    (min 2), seat order locked into the match's first stored `action`, plus a
    "play with bots" escape hatch and `Usion.game.invite()` for more players.
@@ -157,12 +173,17 @@ Mini Golf, Sequence, Ludo). Full detail in
 4. **Every game has a leaderboard, and it feeds Game Center.** Set
    `leaderboard: {enabled: true, order}` on the service and `submit()` on game
    over; show `Usion.leaderboard.friends()` + `top({limit:10})` on the
-   game-over screen. No number? Submit wins, best time, or level reached.
+   solo end screen (death, loss, or victory), with Friends/Global tabs and
+   loading/empty/error states. No number? Submit wins, best time, or level reached.
    Level-based game? The board value is the player's LAST state — register
    `metric: "level"` and submit the level they are currently on every time it
    changes, not a per-run score.
    Report match outcomes with `Usion.game.reportResult({winnerId, ...})` so the
-   result card lands back in the chat the game was started from.
+   result card lands back in the chat the game was started from. Also show an
+   in-game multiplayer result screen on every client: all actual match players,
+   winner/draw, placements/outcomes and meaningful scores or times, including
+   forfeits. Use the locked match roster and authoritative final state, not the
+   lifetime leaderboard. Rematches return to the waiting/ready phase.
 5. **2+ players must not lag or glitch.** Host broadcasts at 15–20 Hz on a
    timer (never per rendered frame), guests interpolate instead of snapping,
    `realtime()` for per-frame state and `action()` for turns, apply exactly

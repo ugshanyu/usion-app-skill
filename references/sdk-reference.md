@@ -641,7 +641,12 @@ code:
 
 Show BOTH boards on your game-over screen — `friends()` (who the player knows)
 and `top({limit:10})` (the worldwide board to chase). A Friends/Global toggle
-is the clean pattern (see the Flappy reference).
+is the clean pattern (see the Flappy reference). This is required after a solo
+run ends, on death, loss, or victory. Keep the earned run result and retry action
+visible while records load. Render rank, player name/avatar, and the record's
+metric; highlight `is_me`. Fetch refreshed boards after score submission settles,
+and handle loading, empty friends lists, and network errors with a compact retry
+state. Never replace unavailable records with fabricated players or scores.
 
 **Recommended pattern for a score-based game** (this is what the Flappy
 reference app does — see publishing.md):
@@ -651,7 +656,9 @@ reference app does — see publishing.md):
 const r = await Usion.leaderboard.submit(score);   // best kept automatically
 showBest(r.best);
 const friends = await Usion.leaderboard.friends();  // render the friends board
-renderRecords(friends);  // {name, avatar, score, rank, is_me} — highlight is_me
+const global = await Usion.leaderboard.top({limit: 10});
+renderRecordTabs({friends, global}); // rank, name, avatar, score; highlight is_me
+// Production UI should catch submission/board failures independently and keep retry usable.
 ```
 
 Submit only real, earned scores (the server keeps the best per player, so
@@ -725,6 +732,19 @@ Report the final result of a **2–8 player match** when it ends and the platfor
 delivers a result card with a tap-to-play button. This is the per-match companion
 to the leaderboard's record-beaten notifications: use `submit()` for "best score
 ever" bragging, `reportResult()` for "here's how our game just went".
+
+**Show results inside the game too.** At match end, every client must show a
+compact result screen using the authoritative final state and the roster locked
+at match start. Include all players who actually played: name/avatar, placement
+or outcome, meaningful score/time/metric, and a clear winner or draw. Highlight
+the local player and label forfeits/disconnections when they affect the result;
+keep departed participants in the final roster. Follow the game's actual ranking
+and tie rules, including lower-is-better games. Do not invent scores for scoreless
+games. Offer rematch through a fresh waiting/ready phase and an exit action where
+the host does not already provide one. A chat result card or a lifetime leaderboard
+does not replace this match result screen. Report the same authoritative outcome
+once from the host with `reportResult()`. Default to participant standings and
+Restart in multiplayer; omit Friends/Global boards unless explicitly requested.
 
 **Where the card lands follows where the game was launched from** (the room's
 originating chat) — you don't choose it, and you don't pass a chat id:
@@ -1071,6 +1091,112 @@ Rules:
   screen intercepts it client-side and jumps to the matching tab. Buttons with
   any other `action_id` do NOT reach your webhook (interactions ride a legacy
   path) — use plain text replies for decisions.
+
+## Minimal game UI inside Usions
+
+Usions already provides the game identity and host header. Do not add a second
+header, game name/logo, branding strip, back/share controls, or duplicate host
+buttons inside the embedded game. Check which actions the host actually exposes;
+keep any essential game-specific action that has no usable host equivalent.
+Standalone games without a host header may provide their own compact navigation.
+
+- Make the playable board/world the main use of the phone viewport. Fit it close
+  and large in portrait and landscape, reserving only the space the controls need.
+- Default to minimal text: omit slogans, welcome copy, decorative section titles,
+  persistent instructions, and labels that repeat what an icon or state shows.
+  Show only indicators that help the next decision (for example health, remaining
+  moves, timer, ammo or a relevant face preview), not a dashboard of statistics.
+- Prefer direct touch or swipes when they fully express the controls. Do not add
+  a directional pad as a duplicate of working swipes. Use a joystick/buttons when
+  the mechanic needs continuous movement, simultaneous actions or precise control.
+- Keep primary actions clear, visually prominent, and easy to tap. For simple
+  round screens, make Lock in, Next, and Restart fill the available content width;
+  use compact controls for settings and secondary actions. Put detailed help/settings and nonessential statistics behind deliberate
+  access instead of permanently occupying the playfield.
+- Minimal visible text must retain accessible names, essential warnings, outcomes,
+  score persistence and usable start/resume/retry flows. Honor explicit user choices.
+- Review the game inside the actual Usions shell on a phone: no duplicated header,
+  no redundant labels or controls, no cropped board, and no control/playfield overlap.
+
+## Game flow, scoring, and result persistence
+
+### Minimal visible text
+
+- Start solo play immediately. Omit welcome screens, slogans, explanatory
+  paragraphs, repeated game titles, and an extra Start gate.
+- Put optional round count, help, and settings behind a compact top control;
+  reuse the host invite picker. For a simple round game, 5 rounds with 5/10/15
+  choices is a useful default, not a requirement for other mechanics.
+- Prefer short labels (Ready, Start, Lock in, Next, Restart) and accessible
+  names on icon buttons. Keep essential score, timer, outcome, and save failures.
+- Solo finish: compact score/best, relevant result comparisons, Friends/Global
+  toggle, and a prominent Restart. Fetch real records inside the game; do not
+  replace them with “Open Usions to see records” copy.
+- Multiplayer finish: all actual participants, meaningful points and placements,
+  winner/draw, and Restart. Hide solo record boards by default. For color games,
+  original/guess swatches should be small comparisons, not another large board.
+
+### One shared multiplayer match
+
+An invite must lead to the same waiting room and match. Show joined players and
+readiness; let the host choose round count before Start. Changing the rules clears
+readiness. Start once the minimum player count is met and everyone present is
+ready. Support the requested capacity in both registry settings and game logic;
+for suitable round games, 2–8 people can play together. Do not hardcode two seats.
+
+Lock the actual roster and shared seed/rules at start. Use the same challenges
+for everyone, validate each player's input, and derive points from authoritative
+state rather than accepting claimed scores. Show live points for every player.
+Round barriers wait for all required participants, with disconnect/recovery rules;
+Restart returns the room to readiness with a new match identity. See
+[multiplayer.md](multiplayer.md) for transport and room lifecycle details.
+
+### Scores that players can trust
+
+Choose a metric that fits the mechanic and label it accurately. Check exact,
+near, and clearly wrong answers plus boundaries and ties. An accuracy percentage
+must give a perfect match 100% and clearly unrelated answers zero, without a
+positive floor. Color matching should use perceptual distance (for example OKLab)
+and a calibrated cutoff/curve rather than normalized RGB distance. A game score
+is not a scientific similarity percentage. Keep formulas deterministic and shared
+across clients; version changed scoring metadata so old records are distinguishable.
+
+### Save the completed result, independently of navigation
+
+Initialize the SDK in both browser iframes and top-level React Native WebViews.
+`window.parent === window` does not imply standalone: the native bridge can be
+`window.ReactNativeWebView`. Wait for `Usion.init` before platform writes.
+
+Capture the final earned result as soon as the terminal state is authoritative.
+For a simultaneous final round, this is when all final guesses are locked, not
+when everyone taps Next/See results. Submit solo scores via
+`Usion.leaderboard.submit`; report a shared outcome from the authoritative client
+via `Usion.game.reportResult`, with explicit winner/draw and standings for 3+
+players. Use the documented stable match identifier across retries.
+
+Await the documented positive backend acknowledgment; a resolved promise alone
+is not proof of success. Keep small Saving/Saved/Retry states. Preserve an unsent
+completed result through Restart; a later worse run must not discard a higher
+unsaved best. Retry the captured result without recomputing it or creating a new
+match identity. Do not attach an old device-local best to a different account.
+Refresh records after successful submission; local best and remote records are
+separate until the server confirms. Keep play/restart usable if records fail.
+
+### Verify the player journey before announcing
+
+Play solo through completion and confirm the account record is stored. Test
+failed acknowledgment and retry, restart before save, and native bridge init.
+Use distinct clients to verify invite → waiting room → all ready → shared rounds
+→ live points → final result saved → participant results → rematch, including
+maximum requested capacity and reconnect. Simulated clients are useful evidence;
+do not describe them as production accounts or physical-device tests.
+
+Inspect portrait and landscape inside the Usions shell: no duplicate header,
+page overflow, clipped controls, or crowded result rows. Keep comparisons in an
+internal scroll area if needed and Restart reachable. Announce only when asked,
+after release verification; use one deduplicated campaign, concise title/body,
+and a game deep link. Provider acceptance is not proof that every user received
+an OS notification.
 
 ## UI utilities
 
