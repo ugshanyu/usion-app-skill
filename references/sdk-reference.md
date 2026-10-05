@@ -39,6 +39,13 @@ Usion.config           // read-only current config
 Usion.getLaunchParams() // {path, ref, roomId, mode} — how the host opened this app
 ```
 
+**Never decide "I'm not inside Usions" from `window.parent === window`.** The
+mobile app runs your app in a React Native WebView, where there is no parent
+window — that check makes every signed-in phone user a logged-out guest (and
+skips their language). Wait for INIT; if you add a standalone fallback timer,
+let a late INIT still upgrade to the signed-in user. `window.ReactNativeWebView`
+exists inside the mobile app if you need a hint.
+
 `config` fields: `userId, userName, userAvatar, authToken, sessionId,
 sessionData, balance, results, theme ('light'|'dark'), language, socketUrl,
 webTransportUrl, roomId, playerIds, serviceId, serviceName, apiUrl,
