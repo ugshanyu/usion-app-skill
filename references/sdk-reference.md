@@ -346,7 +346,28 @@ Usion.cloud.keys()              // Promise<string[]>
 // Shared per-app bucket (all users)
 Usion.cloud.shared.get/set/remove/keys(...)
 Usion.cloud.shared.incr(key, delta?)   // Promise<number> — atomic counter
+
+// Friends-visible values (SDK ≥ 2.33.0-dev.2): you own them, your accepted
+// friends read them in this app. 4 KB/value, 20 keys.
+Usion.cloud.friends.set/get/remove/keys(...)   // your own values
+Usion.cloud.friends.list(key)  // Promise<[{userId, name, avatar, value, updatedAt}]>
 ```
+
+**Friends scope** is how an app shows "what my friends picked" — answers,
+statuses, a favourite, a daily pick — without a server of your own.
+`list(key)` returns only the caller's accepted friends (mutual consent,
+blocked users excluded), newest first, max 200; it never includes the caller,
+strangers, or another app's values. Guests get `[]`. Keep values compact
+(a short string or small object): every friend downloads them.
+
+- Only write here what the user expects friends to see. For anything
+  personal or sensitive (opinions, answers, health), tell the user plainly
+  that friends see it and give them a way to stop sharing —
+  `Usion.cloud.friends.remove(key)` takes it back immediately.
+- Keep the private copy in `Usion.storage` / `Usion.cloud`; the friends value
+  is a mirror, not the source of truth.
+- `shared.*` is writable by every user of the app — treat shared counters as
+  cosmetic, never as a trusted tally.
 
 ## Game (multiplayer)
 

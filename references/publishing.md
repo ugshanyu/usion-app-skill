@@ -88,6 +88,19 @@ no logged-out surface, register with `"guest_access": "none"` — the web then
 shows a login screen at the door instead of a half-working app. Omit the field
 (or `"full"`) to stay open; paid services are door-gated automatically.
 
+**Public | Private:** `"visibility": "private"` (with
+`"allowed_usernames": ["bat", ...]`, up to 50) makes a service visible only to
+you and those people. For them it shows up first in every Explore row, in the
+GameTok feed and in search; everyone else never sees it (nor on leaderboards),
+and for them the detail read, iframe token, bot chat, game rooms, matchmaking
+and world joins all refuse with *"This app is private. Ask its creator to add
+you."* That makes it the way to playtest multiplayer with a closed group before
+launch: you and the people you added can invite each other and get matched
+together. Switch it to `"public"` (on `PUT /services/my/{id}`) to list it; an
+unknown username fails the save with a 422 that names it. Omit both fields to
+stay public. The owner's own reads (`/services/my`) return `allowed_users`
+({id, username, name, avatar}).
+
 Token management endpoints (`POST/GET/DELETE /registry/api-tokens`) require a
 real login session — an API token cannot mint more API tokens (no escalation).
 
