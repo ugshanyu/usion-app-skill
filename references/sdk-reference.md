@@ -355,7 +355,7 @@ Usion.cloud.shared.get/set/remove/keys(...)
 Usion.cloud.shared.incr(key, delta?)   // Promise<number> — atomic counter
 
 // Friends-visible values (SDK ≥ 2.33.0-dev.2): you own them, your accepted
-// friends read them in this app. 4 KB/value, 20 keys.
+// friends read them in this app. 4 KB/value, 200 keys (one per item is fine).
 Usion.cloud.friends.set/get/remove/keys(...)   // your own values
 Usion.cloud.friends.list(key)  // Promise<[{userId, name, avatar, value, updatedAt}]>
 ```
