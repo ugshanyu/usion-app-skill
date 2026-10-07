@@ -32,13 +32,31 @@ For game UI, apply [Minimal game UI inside Usions](references/sdk-reference.md#m
 
 ## Game defaults: play first, say less
 
-Use the least visible text that makes the next action clear. Start solo play
-immediately; keep settings/help behind a compact top control. Use short action
-labels, large touch targets, and a full-width primary action on simple round
-screens. A multiplayer invite opens a waiting room, not another solo session.
-At the end show compact earned results and Restart: Friends/Global records for
-solo, actual participant standings for multiplayer. Save at the terminal game
-state and verify the backend acknowledgment before claiming a record was saved.
+Treat these as Usions game defaults, while preserving explicit user choices:
+
+- **Simple to start.** Enter solo gameplay immediately and teach the core action
+  through play. A multiplayer invite opens its required waiting room.
+- **Harder as play advances.** Start approachable, then increase a meaningful
+  challenge gradually. Keep the controls and rules understandable; extra UI,
+  illegible content, and arbitrary difficulty spikes are not progression.
+- **Only gameplay on the playfield.** Keep each visible control or text element
+  only when it helps the next action or an essential state. Do not add Reveal,
+  Skip, clue counters, tutorials, mode pickers, or explanatory copy by habit.
+  Keep necessary accessibility, pause/resume, outcomes, and failure recovery.
+- **Playful presentation.** Use expressive color, shapes, and responsive feedback
+  suited to the game. When an existing Usions game is the reference, inspect and
+  reuse its visual language before inventing a new style. Minimal UI does not
+  mean a monochrome website or dashboard.
+- **Remember progress.** Resume at the next unfinished level. In finite quizzes
+  or collections, exclude already answered/revealed items from future sessions.
+  Persist progress across refreshes and reopening; repeat completed content only
+  after the player explicitly chooses replay/reset. See the persistence rules below.
+
+At the end show compact earned results and a primary Continue/Play again action
+that respects saved progress: Friends/Global records for solo, actual participant
+standings for multiplayer. Save at the terminal game state and verify the backend
+acknowledgment before claiming a record was saved. Round counts and genre-specific
+mechanics come from the requested game, not a fixed platform-wide number.
 
 Read [game flow, scoring, and result persistence](references/sdk-reference.md#game-flow-scoring-and-result-persistence)
 when building or changing a game. Verify these flows in both the web iframe and
@@ -102,9 +120,10 @@ builds flagged/rejected):
   the game checklist below and the multiplayer reference) — it's the room the
   chat invite leads to, duels included.
 
-Design: mobile-first, small embedded frame, Vercel-inspired minimalism
-(black/white, flat, generous whitespace). Respect `Usion.getTheme()` and
-`Usion.getLanguage()` — don't hardcode user-facing strings to one locale.
+Design for the small, mobile-first embedded frame. Games use the playful,
+gameplay-first defaults above; utility apps may use a restrained, flat layout.
+Respect `Usion.getTheme()` and `Usion.getLanguage()` — don't hardcode user-facing
+strings to one locale.
 
 ## Step 3 — Pick your capabilities
 

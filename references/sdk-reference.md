@@ -1136,12 +1136,21 @@ buttons inside the embedded game. Check which actions the host actually exposes;
 keep any essential game-specific action that has no usable host equivalent.
 Standalone games without a host header may provide their own compact navigation.
 
+- Use a playful visual language suited to the mechanic: expressive colors,
+  readable shapes, satisfying press/answer feedback, and restrained motion.
+  Follow an existing Usions game reference when supplied. Keep contrast,
+  accessible names, and reduced-motion support; decoration must not compete
+  with the action. Do not apply utility-app monochrome styling to every game.
 - Make the playable board/world the main use of the phone viewport. Fit it close
   and large in portrait and landscape, reserving only the space the controls need.
 - Default to minimal text: omit slogans, welcome copy, decorative section titles,
   persistent instructions, and labels that repeat what an icon or state shows.
   Show only indicators that help the next decision (for example health, remaining
   moves, timer, ammo or a relevant face preview), not a dashboard of statistics.
+- Do not add auxiliary gameplay buttons by default. Reveal, Skip, hint counters,
+  confirmation gates, and persistent instructions need a purpose in the requested
+  mechanic. Remove their unused shortcuts and explanatory copy when removing the
+  feature. Keep failure recovery available without bringing back routine clutter.
 - Prefer direct touch or swipes when they fully express the controls. Do not add
   a directional pad as a duplicate of working swipes. Use a joystick/buttons when
   the mechanic needs continuous movement, simultaneous actions or precise control.
@@ -1161,8 +1170,8 @@ Standalone games without a host header may provide their own compact navigation.
 - Start solo play immediately. Omit welcome screens, slogans, explanatory
   paragraphs, repeated game titles, and an extra Start gate.
 - Put optional round count, help, and settings behind a compact top control;
-  reuse the host invite picker. For a simple round game, 5 rounds with 5/10/15
-  choices is a useful default, not a requirement for other mechanics.
+  reuse the host invite picker. Choose the round count for the requested game;
+  do not add a round-count picker or impose one game's count on unrelated games.
 - Prefer short labels (Ready, Start, Lock in, Next, Restart) and accessible
   names on icon buttons. Keep essential score, timer, outcome, and save failures.
 - Solo finish: compact score/best, relevant result comparisons, Friends/Global
@@ -1171,6 +1180,50 @@ Standalone games without a host header may provide their own compact navigation.
 - Multiplayer finish: all actual participants, meaningful points and placements,
   winner/draw, and Restart. Hide solo record boards by default. For color games,
   original/guess swatches should be small comparisons, not another large board.
+
+### Start simple, increase the challenge
+
+Choose a concrete difficulty axis that fits the mechanic: speed, precision,
+pattern complexity, opponent behavior, or challenge similarity. Start with an
+approachable first level and increase demand gradually as rounds/levels advance,
+without expanding the controls or requiring more instruction text. Preserve an
+achievable path and readable, answerable challenges; obscuring all useful visual
+information is not a substitute for skill-based difficulty.
+
+For recognition games, curate content for the intended audience and remove assets
+that give away the answer. A famous-film or brand list is not evidence that this
+audience recognizes every item. Inspect early, middle, and late play; verify the
+actual difficulty parameters change and playtest that the progression feels fair.
+An automated bot finishing proves reachability, not human difficulty calibration.
+
+### Save progress; do not repeat completed content
+
+- Save completed level IDs/checkpoints when completion becomes authoritative,
+  before Next or navigation. Reopen at the next unfinished level, preserving
+  earned unlocks. Retrying a failed, unfinished level is different from forcing
+  the player through a level already passed.
+- For finite quizzes/recognition collections, save the question/item ID as soon
+  as an answer exposes its solution, including a wrong guess. Filter answered
+  IDs before selecting new questions, across restarts, modes, and collections.
+  Track stable content IDs, not a shuffled index or only the numeric high score.
+- Use the documented per-user, per-app `Usion.storage` API for durable progress
+  after SDK initialization. Handle its acknowledgment and offline behavior;
+  merge progress without overwriting newer completions with a stale save. Keep
+  standalone/local fallbacks namespaced and do not attach one user's progress to
+  another account. If history is device-local only, state that limit; never claim
+  cross-device persistence or invent history older versions did not record.
+- When unseen content runs out, offer other unfinished content or a compact
+  completion state. A final short session is preferable to silently recycling
+  questions; use its actual count in UI and score metadata. Replay/reset must be
+  an explicit player choice and must not erase unrelated records or collections.
+- New runs in endless/competitive games may be fresh attempts; this rule protects
+  completed finite content and campaign progress. Keep shared multiplayer rounds
+  identical for all participants rather than filtering each client's match
+  separately. Honor explicitly requested replay/training modes.
+
+Verify completion → leave/reload → resume, new-session exclusion, overlapping
+collections, a final partial session, exhaustion, and explicit replay/reset when
+applicable. Test offline/retry and account isolation for platform-backed saves.
 
 ### One shared multiplayer match
 
