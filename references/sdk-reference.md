@@ -376,6 +376,14 @@ strangers, or another app's values. Guests get `[]`. Keep values compact
 - `shared.*` is writable by every user of the app — treat shared counters as
   cosmetic, never as a trusted tally.
 
+**Server-verified friendships (opt-in, your own backend):** a friends value is
+a hint, never an access key. When your server gates something on friendship
+(e.g. friends-only content), it asks the platform with the signed
+`POST /services/{id}/friendships` — the viewer's current iframe token plus up
+to 100 candidate user ids → the viewer's accepted, non-blocked friends among
+them. Enabled per service by the Usion team (`capabilities.friends_check`);
+see `references/publishing.md`.
+
 ## Game (multiplayer)
 
 ### Connection & rooms
@@ -974,6 +982,80 @@ Usion.notify.isMuted()                     // Promise<boolean>
   `body` ≤ 200, `path` ≤ 512. Muted services are silently dropped.
 - **Server-triggered** (job finishes while the app is closed): your own backend
   calls the signed `POST /services/{id}/notify` — see `references/publishing.md`.
+
+### Daily reminders (REST, no new SDK method)
+
+The platform can deliver one daily reminder while an opted-in app is closed.
+The owner first configures `daily_reminder` through the existing service
+registration/update API:
+
+```json
+{"enabled":true,"hour_utc":0,"minute_utc":0,"default_locale":"en",
+ "messages":{"en":{"title":"A new day","body":"Your daily challenge is ready."}},
+ "path":"/daily"}
+```
+
+Hours/minutes are UTC (0–23 / 0–59). There are at most 16 locale keys, each
+2–20 characters such as `en`, `mn`, or `en-US`; the default locale must have a
+message when enabled. Title/body limits are 80/200 characters, both nonblank;
+`path` is a safe relative in-app path, at most 512 characters. Explicit `null`
+or `enabled:false` turns the service capability off. Only published public
+services with valid enabled configuration can accept new subscriptions.
+
+The mini-app uses its **current** `Usion.user.getToken()` and its own
+`Usion.config.serviceId` / `apiUrl` for these authenticated REST calls:
+
+```text
+GET /services/{service_id}/reminders/daily
+PUT /services/{service_id}/reminders/daily
+Authorization: Bearer <service-scoped iframe token>
+PUT body: {"enabled":true,"locale":"en"}
+```
+
+GET and PUT return `{service_id, enabled, decided, locale,
+permission_granted, muted, configured, next_run_at, schedule}`. `schedule`
+is `{hour_utc,minute_utc}` or null without valid configuration. `enabled`
+is the saved choice, not an assurance that delivery is available;
+`next_run_at` is an ISO UTC `Z` timestamp, or null when disabled, unconfigured,
+revoked or muted. `decided` is false until a PUT persists a choice, including
+`enabled:false` for “Later”. No subscriber directory is exposed.
+
+Show clear daily-reminder consent. On the user's enable action, call
+`Usion.permissions.request(['notifications'], {reason})` first, then PUT true
+only if explicitly granted. An existing general notification grant is not a
+reason to silently subscribe someone. Never grant permissions from iframe
+code or automatically unmute. PUT false needs no permission and remains
+available after revocation, muting or service unpublishing. Read the current
+token for each request and discard a response if the user changed while it
+was pending. Standalone guests cannot subscribe.
+
+New opt-ins start strictly at the next future scheduled time; repeated true
+updates or locale changes preserve an already enabled subscription's due time.
+The minute-based sweep rechecks the saved choice, explicit permission, mute,
+active account and service configuration. Durable atomic claims allow at most
+one attempt per user/service/scheduled UTC date across replicas and restarts.
+It catches up only within four hours, skips older reminders and never bursts
+missed days. An interrupted or ambiguous send is not replayed. Index failure
+disables this capability with 503 and retries initialization every five minutes.
+
+Errors use `detail:{code,message}`: 401 `NOT_AUTHENTICATED`, 404 `NOT_FOUND`,
+403 `PERMISSION_REQUIRED` or `NOT_CONFIGURED`, 422 `INVALID_INPUT` for an
+unconfigured locale, 409 `CONFLICT` for concurrent setting changes, and 503
+`UNAVAILABLE` before storage is ready. Malformed bodies use normal FastAPI 422.
+App-level consent is separate from OS notification permission. Foreground
+web/native clients receive in-app banners; offline OS push requires a registered
+native device with notifications allowed. A send attempt is not proof of receipt.
+
+## Background audio (platform flag)
+
+By default the mobile host pauses every `<audio>`/`<video>` in your page when
+the app is backgrounded or the phone locks (and fires `visibilitychange` —
+pause your loop there). A service the Usion team flags `background_audio: true`
+(radio, podcasts) keeps its media playing in the background; `visibilitychange`
+/ `document.hidden` still report it, so stop animations but leave the audio
+alone. Closing the app always stops playback. Web browsers never pause media on
+blur, so nothing changes there. Not self-serve — ask for it when your app is
+genuinely listen-in-the-background.
 
 ## Results, file export, and sharing
 
