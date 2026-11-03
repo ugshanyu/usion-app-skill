@@ -1,8 +1,10 @@
 # Usion SDK — full API reference
 
 Source of truth: `packages/sdk/src/modules/*.js` and `packages/sdk/types/index.d.ts`
-(npm `@usions/sdk`, version in `packages/sdk/package.json` — 2.24.0 at time of
-writing). The browser bundle is served at `https://usions.com/usion-sdk.js`.
+(browser SDK `2.34.0`). The browser bundle is served at
+`https://usions.com/usion-sdk.js`; the immutable version is
+`https://usions.com/sdk/v2/2.34.0/usion-sdk.js`. The npm registry may
+lag the browser release; verify the published package version before relying on it.
 If anything here disagrees with the source, the source wins.
 
 > **Chat-list surfacing is automatic (SDK ≥ 2.15).** Your app appears in the
@@ -18,6 +20,7 @@ If anything here disagrees with the source, the source wins.
 3. [Storage (durable)](#storage-durable) · [File storage](#file-storage) · [Cloud KV](#cloud-kv-server-persisted)
 4. [Game (multiplayer)](#game-multiplayer)
 5. [Lobby](#lobby) · [Matchmaking](#matchmaking) · [Leaderboard](#leaderboard)
+   · [Voice](#voice-usioncall-sdk--235)
 6. [Chat](#chat) · [Bot](#bot)
 7. [Results, sharing, misc root methods](#results-sharing-misc)
 8. [Hybrid tabbed services](#hybrid-tabbed-services-sdk--225)
@@ -143,7 +146,16 @@ Usion.user.getAvatar()  // string|null
 Usion.user.isAdult()    // true | false | null   (sync, SDK >=2.29)
 Usion.user.getToken()   // JWT for socket connections (used internally)
 Usion.user.getProfile() // Promise<{id, name, avatar, isAdult}>
+Usion.user.openProfile(userId) // SDK >=2.33 — open ANOTHER player's Usion profile (void)
 ```
+
+`openProfile(userId)` shows that player's profile over your app (their
+records, a Message button); your app keeps running underneath and back returns
+to it exactly where it was. Use it wherever you show other real players — above
+all on leaderboard rows (see "Leaderboard + records"). Pass a real user id
+(`entry.user_id`, `room.player_ids[i]`); it is a no-op for bot/AI seats you
+made up, `guest_` ids, outside the Usion host, and on hosts that predate it, so
+never gate gameplay on it.
 
 ### Age gating (`isAdult`)
 
@@ -376,6 +388,14 @@ strangers, or another app's values. Guests get `[]`. Keep values compact
 - `shared.*` is writable by every user of the app — treat shared counters as
   cosmetic, never as a trusted tally.
 
+**Server-verified friendships (opt-in, your own backend):** a friends value is
+a hint, never an access key. When your server gates something on friendship
+(e.g. friends-only content), it asks the platform with the signed
+`POST /services/{id}/friendships` — the viewer's current iframe token plus up
+to 100 candidate user ids → the viewer's accepted, non-blocked friends among
+them. Enabled per service by the Usion team (`capabilities.friends_check`);
+see `references/publishing.md`.
+
 ## Game (multiplayer)
 
 ### Connection & rooms
@@ -589,6 +609,74 @@ Usion.lobby.queue(serviceId, {conversationId?})  // create/find a room via REST
 Usion.lobby.onUpdate(cb) / onStarted(cb)  // cb({room_id, by, player_ids?})
 ```
 
+## Voice (`Usion.call`, SDK ≥ 2.35)
+
+Players talk to each other through the platform's voice calls. **Your game draws
+its own mic button; turning it on puts the player in a voice channel, and
+everyone in the same channel hears each other.** Channels are names YOU pick —
+one per table, team, lobby, whatever your game needs. The host app does the
+audio, asks for the microphone once per game, and owns safety (mute, block,
+report) and limits. You never get audio streams or tokens.
+
+```javascript
+Usion.call.isAvailable()           // false on old app versions → hide the mic button
+await Usion.call.micOn({ channel: 'table' })        // join with mic on (call from a TAP)
+await Usion.call.micOn({ channel: 'lobby', scope: 'game' })  // shared across the whole game
+await Usion.call.micOn({ channel: 'stands', listen: true })  // hear others, mic off
+await Usion.call.micOff()          // leave the channel
+await Usion.call.setMic(false)     // stay in, stop talking (true = talk again)
+await Usion.call.mutePeer(userId)  // only I stop hearing them (mutePeer(id, false) undoes)
+await Usion.call.state()           // VoiceState (idle when not in a channel)
+Usion.call.onChange(state => …)    // joins, leaves, mic, connection
+Usion.call.onSpeaking(userIds => …) // who is talking now (≤ 4 updates/s)
+// VoiceState: { on, channel, scope, status: 'idle'|'connecting'|'connected'|'reconnecting',
+//               micOn, peers: [{ userId, name, isMe, micOn, speaking }] }
+```
+
+**Scopes.** `scope: 'room'` (default) ties the channel to the current game room —
+only players seated in that room can join, so invite games stay private. It
+needs a room (`Usion.config.roomId` / after `game.join`); a solo launch without
+one rejects `VOICE_NO_ROOM`. `scope: 'game'` is shared by every player of your
+game who uses the same name — use it for lobbies and open tables, knowing
+strangers will be there. Names: 1–48 of `a-z 0-9 - _` (lowercase), default `'main'`.
+One channel at a time: calling `micOn` with another name moves the player.
+
+**The one-button pattern (start here):**
+
+```javascript
+const micBtn = document.getElementById('mic');
+micBtn.hidden = !Usion.call.isAvailable();
+micBtn.onclick = async () => {
+  try {
+    const s = await Usion.call.state();
+    if (s.on) await Usion.call.micOff();
+    else await Usion.call.micOn({ channel: 'table' });
+  } catch (err) {
+    if (err.code === 'VOICE_DECLINED' || err.code === 'VOICE_MIC_DENIED') return; // user said no
+    showToast(t('voiceFailed'));
+  }
+};
+Usion.call.onChange(s => micBtn.classList.toggle('live', s.on && s.micOn));
+Usion.call.onSpeaking(ids => seats.forEach(seat => seat.el.classList.toggle('talking', ids.includes(seat.userId))));
+```
+
+Rules:
+- **Only call `micOn` from a user tap.** Never turn the mic on at load or on a
+  timer — the host refuses while the game isn't on screen, and auto-joining
+  voice is a privacy bug.
+- Show who is talking on your own UI (seat glow, name tag) from `onSpeaking`;
+  show `micOn === false` peers with a muted icon. Bots are never in `peers`.
+- Leaving the game screen ends voice; you don't need to clean up. Backgrounding
+  the app keeps it (like a phone call).
+- The host shows a live-mic pill over your game while voice is on; don't draw a
+  second "leave call" control that fights it — your mic button is enough.
+- Errors: `VOICE_UNSUPPORTED` (old app — hide the button), `VOICE_DECLINED`,
+  `VOICE_MIC_DENIED`, `VOICE_NO_ROOM`, `VOICE_NOT_IN_ROOM`, `VOICE_FULL` (16 per
+  channel, or the room's max players), `VOICE_DISABLED`, `VOICE_GUEST` (web
+  visitor not logged in), `VOICE_BAD_CHANNEL`, `VOICE_FAILED` (network).
+- The devkit emulates channels across tabs (`usion dev`): two tabs in the same
+  channel see each other in `peers`; the chaos panel fakes talking and drops voice.
+
 ## Matchmaking
 
 Queue with strangers (`mm:*`).
@@ -602,6 +690,59 @@ Usion.matchmaking.find(serviceId?, {size?, timeout?})  // Promise<{roomId, playe
 Usion.matchmaking.cancel()
 Usion.matchmaking.onMatch(cb)
 ```
+
+## Tournament support registration
+
+Tournament support is explicit service metadata, shared by SDK v2 and v3:
+`"tournament": { "enabled": true }`. The service must have the `game` tag.
+It declares eligibility for tournament discovery, not an active tournament.
+It does not create brackets, charge entry fees, pay prizes, or grant authority
+to report trusted competitive results. Never infer eligibility merely from
+multiplayer or a leaderboard, and do not add `tournament` to `sdk.capabilities`.
+
+For a hand-built game, the creator's trusted tooling sends the following to the
+creator REST API with `Authorization: Bearer <creator-token>`; never put that
+credential inside mini-app JavaScript:
+
+```http
+POST /services
+Content-Type: application/json
+
+{
+  "name": "My Game",
+  "iframe_url": "https://game.example",
+  "tags": ["game"],
+  "is_published": true,
+  "tournament": { "enabled": true }
+}
+```
+
+For an existing game, `PUT /services/<service-id>` with
+`{ "tournament": { "enabled": true } }` enables support. Send `enabled: false`
+to disable. Omit `tournament` on unrelated updates to preserve it. Existing
+games are not opted in automatically, and new games default to disabled.
+Discover eligible games with
+`GET /registry/explore/items?section=games&tournament=true`; normal publication,
+visibility, and access rules still apply.
+The new-game example publishes the registration. Setting tournament support on
+an existing game preserves its publication status; unpublished games stay out
+of public discovery.
+
+For an AI Creator build, include this in the artifact's entry HTML only when
+the creator requests tournament support and the game is designed for it:
+
+```html
+<meta name="usion:tournament" content="true">
+```
+
+The publish step registers the metadata. Use `content="false"` to disable.
+Exactly one declaration is allowed, with the exact lowercase value `true` or
+`false`; malformed values, duplicate declarations, and duplicate attributes
+are rejected before release upload. Comments, scripts, templates, and non-entry
+files do not opt in. An absent marker preserves a previous registration; a
+game converted to an app must explicitly disable tournament support first.
+The marker is a Builder publishing declaration, not a browser SDK call, and
+does not update the registration of an independently hosted game.
 
 ## Leaderboard + records
 
@@ -672,7 +813,11 @@ and `top({limit:10})` (the worldwide board to chase). A Friends/Global toggle
 is the clean pattern (see the Flappy reference). This is required after a solo
 run ends, on death, loss, or victory. Keep the earned run result and retry action
 visible while records load. Render rank, player name/avatar, and the record's
-metric; highlight `is_me`. Fetch refreshed boards after score submission settles,
+metric; highlight `is_me`. **Every other player's row opens their profile**:
+make the row (avatar + name) a real `<button>` that calls
+`Usion.user.openProfile(entry.user_id)` — players tap a friend's record or a
+global top score to see who that is. Your own row (`is_me`) is not a button.
+Fetch refreshed boards after score submission settles,
 and handle loading, empty friends lists, and network errors with a compact retry
 state. Never replace unavailable records with fabricated players or scores.
 
@@ -686,6 +831,19 @@ showBest(r.best);
 const friends = await Usion.leaderboard.friends();  // render the friends board
 const global = await Usion.leaderboard.top({limit: 10});
 renderRecordTabs({friends, global}); // rank, name, avatar, score; highlight is_me
+
+// each row: tapping another player opens their Usion profile over the game
+function recordRow(entry) {
+  const row = document.createElement(entry.is_me ? 'div' : 'button');
+  row.className = 'record-row' + (entry.is_me ? ' me' : '');
+  row.textContent = `${entry.rank}. ${entry.name || '—'}  ${entry.score}`;
+  if (!entry.is_me) {
+    row.type = 'button';
+    row.setAttribute('aria-label', entry.name || '');
+    row.addEventListener('click', () => Usion.user.openProfile(entry.user_id));
+  }
+  return row;
+}
 // Production UI should catch submission/board failures independently and keep retry usable.
 ```
 
@@ -975,6 +1133,80 @@ Usion.notify.isMuted()                     // Promise<boolean>
 - **Server-triggered** (job finishes while the app is closed): your own backend
   calls the signed `POST /services/{id}/notify` — see `references/publishing.md`.
 
+### Daily reminders (REST, no new SDK method)
+
+The platform can deliver one daily reminder while an opted-in app is closed.
+The owner first configures `daily_reminder` through the existing service
+registration/update API:
+
+```json
+{"enabled":true,"hour_utc":0,"minute_utc":0,"default_locale":"en",
+ "messages":{"en":{"title":"A new day","body":"Your daily challenge is ready."}},
+ "path":"/daily"}
+```
+
+Hours/minutes are UTC (0–23 / 0–59). There are at most 16 locale keys, each
+2–20 characters such as `en`, `mn`, or `en-US`; the default locale must have a
+message when enabled. Title/body limits are 80/200 characters, both nonblank;
+`path` is a safe relative in-app path, at most 512 characters. Explicit `null`
+or `enabled:false` turns the service capability off. Only published public
+services with valid enabled configuration can accept new subscriptions.
+
+The mini-app uses its **current** `Usion.user.getToken()` and its own
+`Usion.config.serviceId` / `apiUrl` for these authenticated REST calls:
+
+```text
+GET /services/{service_id}/reminders/daily
+PUT /services/{service_id}/reminders/daily
+Authorization: Bearer <service-scoped iframe token>
+PUT body: {"enabled":true,"locale":"en"}
+```
+
+GET and PUT return `{service_id, enabled, decided, locale,
+permission_granted, muted, configured, next_run_at, schedule}`. `schedule`
+is `{hour_utc,minute_utc}` or null without valid configuration. `enabled`
+is the saved choice, not an assurance that delivery is available;
+`next_run_at` is an ISO UTC `Z` timestamp, or null when disabled, unconfigured,
+revoked or muted. `decided` is false until a PUT persists a choice, including
+`enabled:false` for “Later”. No subscriber directory is exposed.
+
+Show clear daily-reminder consent. On the user's enable action, call
+`Usion.permissions.request(['notifications'], {reason})` first, then PUT true
+only if explicitly granted. An existing general notification grant is not a
+reason to silently subscribe someone. Never grant permissions from iframe
+code or automatically unmute. PUT false needs no permission and remains
+available after revocation, muting or service unpublishing. Read the current
+token for each request and discard a response if the user changed while it
+was pending. Standalone guests cannot subscribe.
+
+New opt-ins start strictly at the next future scheduled time; repeated true
+updates or locale changes preserve an already enabled subscription's due time.
+The minute-based sweep rechecks the saved choice, explicit permission, mute,
+active account and service configuration. Durable atomic claims allow at most
+one attempt per user/service/scheduled UTC date across replicas and restarts.
+It catches up only within four hours, skips older reminders and never bursts
+missed days. An interrupted or ambiguous send is not replayed. Index failure
+disables this capability with 503 and retries initialization every five minutes.
+
+Errors use `detail:{code,message}`: 401 `NOT_AUTHENTICATED`, 404 `NOT_FOUND`,
+403 `PERMISSION_REQUIRED` or `NOT_CONFIGURED`, 422 `INVALID_INPUT` for an
+unconfigured locale, 409 `CONFLICT` for concurrent setting changes, and 503
+`UNAVAILABLE` before storage is ready. Malformed bodies use normal FastAPI 422.
+App-level consent is separate from OS notification permission. Foreground
+web/native clients receive in-app banners; offline OS push requires a registered
+native device with notifications allowed. A send attempt is not proof of receipt.
+
+## Background audio (platform flag)
+
+By default the mobile host pauses every `<audio>`/`<video>` in your page when
+the app is backgrounded or the phone locks (and fires `visibilitychange` —
+pause your loop there). A service the Usion team flags `background_audio: true`
+(radio, podcasts) keeps its media playing in the background; `visibilitychange`
+/ `document.hidden` still report it, so stop animations but leave the audio
+alone. Closing the app always stops playback. Web browsers never pause media on
+blur, so nothing changes there. Not self-serve — ask for it when your app is
+genuinely listen-in-the-background.
+
 ## Results, file export, and sharing
 
 ```javascript
@@ -990,7 +1222,15 @@ Usion.shareToStory(url, {            // SDK >= 2.32; straight onto an IG story
   filename?, mimeType?, stickerUrl?,
   backgroundTopColor?, backgroundBottomColor?
 })                                   // Promise<{success, destination, fallback?}>
-Usion.shareToFeed(contentType, data) // Promise<{success, postId?, shareUrl?}>
+Usion.canShareToFeed()               // SDK >= 2.33; true only on hosts that can confirm feed posts
+Usion.canShareToFeed('image')        // SDK >= 2.33.0-dev.7; host also accepts `image`
+Usion.canShareToFeed('video')        // legacy small MP4 data URL support
+Usion.canShareToFeed('videoUpload')  // SDK >= 2.34.0; multipart video upload, up to 3 GiB
+Usion.uploadFeedVideo(file)           // Promise<{receipt}>; bounded multipart upload
+Usion.shareToFeed('text', {          // SDK >= 2.33; News Feed post + link back into the app
+  text, path?, requestId?, card?: {title, subtitle?}, image?, videoReceipt?
+})                                   // Promise<{success: true, postId}>; host confirms every time
+Usion.openApp(serviceId, path?)      // SDK >= 2.33; open an app (or yourself) at an in-app path
 Usion.download(url, filename?, {     // SDK >= 2.29
   destination: 'auto'|'gallery'|'files',
   mimeType?, title?
@@ -1062,7 +1302,139 @@ File-transfer rules:
 - `Usion.share` remains the user-facing platform share flow (Usions contacts,
   service attribution, then an external action). Use `shareFile` when the button
   specifically means “send this file to another app.” Use `shareToFeed` only for
-  a signed-in user's attributed Usions feed post.
+  a signed-in user's attributed Usions feed post (below).
+
+### Share to the News Feed + open an app at a path (SDK ≥ 2.33)
+
+An **app link** is two strings: a service id + a relative in-app path — the
+same `path` `Usion.notify` uses (`/q/57`, starts with ONE `/`, ≤ 512 chars, no
+`//`, `://`, spaces, backslashes or control characters). There are no URLs or
+schemes to build.
+
+```javascript
+// Show the button ONLY when the host can confirm + post (older app builds can't).
+shareButton.hidden = !Usion.canShareToFeed();
+
+// User tapped "Share to feed" on something they made.
+try {
+  const { postId } = await Usion.shareToFeed('text', {
+    text: comment,                         // required caption, ≤ 1000 chars
+    card: { title: question, subtitle: `Hot take #${id}` }, // optional: the shared item
+    path: `/q/${id}`,                      // optional: where a reader lands in your app
+    // optional: the card as a picture — only when the host can take it
+    ...(Usion.canShareToFeed('image') ? { image: cardCanvas.toDataURL('image/png') } : {}),
+  });
+  showToast('Shared');
+} catch (err) {
+  if (err.code === 'CANCELLED') return;    // user said no — do nothing, no error UI
+  if (err.code === 'RATE_LIMITED') return showToast('Try again later');
+  // NOT_AUTHENTICATED (guest), PERMISSION_DENIED (app not public),
+  // INVALID_INPUT (empty text / bad path), REQUEST_TIMEOUT, UNKNOWN
+}
+
+// Upload the user's File directly, then ask the host to preview and confirm.
+if (Usion.canShareToFeed('videoUpload')) {
+  const { receipt } = await Usion.uploadFeedVideo(videoFile);
+  await Usion.shareToFeed('video', { text: 'My clip', videoReceipt: receipt });
+}
+
+// Open another app — or this one — at a path (fire-and-forget).
+Usion.openApp('hot-takes', '/q/57');
+```
+
+#### Copyable video example
+
+For a hand-built app, load `<script src="https://usions.com/sdk/v2/2.34.0/usion-sdk.js"></script>` before this code. For an AI-Creator app, the platform injects the SDK; do not add another script. Register a public app, and when pinning SDK metadata use `{ "major": 2, "protocol": 2, "version": "2.34.0", "capabilities": ["share"] }`. Older hosts return false for the video capability.
+
+```html
+<input id="clip" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska" hidden>
+<button id="share-clip" hidden>Share video to News Feed</button>
+<p id="share-status" role="status"></p>
+<script>
+const button = document.getElementById('share-clip');
+const input = document.getElementById('clip');
+const status = document.getElementById('share-status');
+Usion.init(() => { button.hidden = !Usion.canShareToFeed('videoUpload'); });
+button.addEventListener('click', () => input.click());
+input.addEventListener('change', async () => {
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  if (!['video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska'].includes(file.type) || file.size > 3 * 1024 * 1024 * 1024) {
+    status.textContent = 'Choose a supported video up to 3 GiB.';
+    return;
+  }
+  button.disabled = true;
+  try {
+    const { receipt } = await Usion.uploadFeedVideo(file);
+    const result = await Usion.shareToFeed('video', { text: 'My video', videoReceipt: receipt });
+    status.textContent = result.postId ? 'Posted to News Feed.' : 'Posted.';
+  } catch (error) {
+    status.textContent = error?.code === 'CANCELLED' ? 'Not posted.' : 'Could not post; please try again.';
+  } finally { button.disabled = false; }
+});
+</script>
+```
+
+Uploads use bounded parts; pass `{ requestId: crypto.randomUUID(), onProgress: ({loaded, total}) => ... }` to `uploadFeedVideo` to track progress. Keep the request ID and pass it again with the same file to resume an interrupted upload. Pass an `AbortSignal` as `signal` to cancel and discard the upload. Do not reuse an ID for a different file.
+
+The SDK requires the user to be signed in and the app to be publicly listed. The host previews the video and asks the user to confirm. A successful result contains `postId`; errors reject, including `CANCELLED`, `UNSUPPORTED`, `RATE_LIMITED`, and `PERMISSION_DENIED`. A profile item links back to the News Feed post. Do not send URLs or a `media` array for this API.
+
+- **Show your share button only when `Usion.canShareToFeed()` is true.** It
+  reads `hostFeatures.feedShare` from the host's INIT config; outside a host and
+  on older app builds it is `false` — hide the button there, don't show an error.
+- **The host asks every time.** `shareToFeed` shows a confirm sheet (the text,
+  your app's icon + name, Post / Cancel); nothing is ever posted silently, and
+  there is no permission to request first. Call it from a visible user tap —
+  never automatically. Cancel rejects with `CANCELLED`; treat it as normal.
+- **`card` is the thing being shared** — e.g. the question — shown on the feed
+  as a tappable card (opens `path`); **your `text` is the caption** (what the
+  user says about it). `title` is required (1–200 characters), `subtitle` is
+  optional (≤ 60); both are trimmed and checked locally (`INVALID_INPUT`). Don't
+  repeat the card inside `text`, and don't write your app's name into either:
+  **the feed post mentions your app automatically**.
+- **`image` is the shared card as a picture** (e.g. your question card rendered
+  to a canvas): a `data:image/(png|jpeg|webp);base64,…` URL, ≤ 5 MB decoded
+  (prefer a ~1080px-wide JPEG/WebP). Send it **only when
+  `Usion.canShareToFeed('image')` is true** — older hosts drop it silently. Keep
+  sending `card` with it: the title/subtitle are the picture's alt text and
+  what the profile shows as the post's title. A non-data URL, another image
+  type or an oversized image is rejected locally (`INVALID_INPUT`).
+- The post is **public**, appears in the News Feed and on the author's
+  profile, and shows a chip with your app's real icon and name (from the
+  registry — the name you pass is ignored). Tapping the chip opens your app at
+  `path`.
+- **Public (listed) apps only** — a private or unlisted app gets
+  `PERMISSION_DENIED`, since readers couldn't open it. Guests get
+  `NOT_AUTHENTICATED`. The legacy `media` array is ignored. For video, check `Usion.canShareToFeed('videoUpload')`, upload a File with `Usion.uploadFeedVideo(file)`, and pass its `receipt` as `videoReceipt` to `shareToFeed('video', ...)`. The limit is 3 GiB per video with SDK 2.34.0 or newer (older SDKs are limited to 100 MiB); MP4, QuickTime, WebM and Matroska MIME types are supported. The host resolves the user- and app-bound receipt, previews the video, and asks for confirmation before posting. MP4 with H.264/AAC offers broad playback compatibility. Older hosts do not support this path. The older `video` base64 path remains limited to 5 MiB.
+- **Limits:** 5 posts per minute and 30 per day per user per app
+  (`RATE_LIMITED`). One call = at most one post: the SDK generates a
+  `requestId` when you don't pass one, so a retry never duplicates. Pass your
+  own `requestId` (a UUID you keep per item) if a later "try again" for the same
+  item must not post twice.
+- Empty text, a bad path, card or image is rejected locally (`INVALID_INPUT`) before the
+  host is asked. `openApp` throws `INVALID_INPUT` synchronously for an empty
+  service id or a bad path; the host checks the app exists and the user may
+  open it. `openApp` of your own service id navigates in place (`HOST_NAVIGATE`).
+
+**Handling an incoming path** (from a feed chip, a notification, or `openApp`)
+— do both:
+
+```javascript
+Usion.init(() => {
+  route(Usion.getLaunchParams().path);          // cold start: opened at a path
+  Usion.onHostNavigate(({ path }) => route(path)); // already open: navigate in place
+});
+function route(path) {
+  const m = /^\/q\/(\d+)$/.exec(path || '');
+  if (m) showQuestionFirst(Number(m[1]));         // unknown/stale paths → home
+}
+```
+
+Subscribing with `onHostNavigate` tells the host you navigate in place; without
+it the host may reload your app with the new path in `getLaunchParams().path`.
+Always tolerate a path that no longer exists (deleted item, older link): fall
+back to your home screen, never a blank page.
 
 ### Back button: the claim is ONE-SHOT — re-claim per screen
 
@@ -1377,7 +1749,8 @@ WORLD_FULL, NOT_AUTHORITY, NOT_AUTHENTICATED, JOIN_TIMEOUT, CONNECT_TIMEOUT, INI
 MATCH_TIMEOUT, STATE_TOO_LARGE, INVALID_STATE, STALE_STATE, INVALID_NEXT_TURN,
 INVALID_INPUT, NOT_FOUND, QUOTA_EXCEEDED, VALUE_TOO_LARGE, LOBBY_FULL,
 LOBBY_CLOSED, CONFLICT, RATE_LIMITED, REQUEST_TIMEOUT, QUEUE_FULL, CANCELLED,
-SUPERSEDED, UNSUPPORTED, UNKNOWN`. `RATE_LIMITED` carries `err.retryAfter`
+SUPERSEDED, UNSUPPORTED, UNKNOWN`, plus the voice codes (`VOICE_*`, see
+[Voice](#voice-usioncall-sdk--235)). `RATE_LIMITED` carries `err.retryAfter`
 (seconds until the window resets). You rarely need to HANDLE `NOT_IN_ROOM` —
 the SDK auto-rejoins and retries the action for you.
 

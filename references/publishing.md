@@ -88,6 +88,13 @@ no logged-out surface, register with `"guest_access": "none"` — the web then
 shows a login screen at the door instead of a half-working app. Omit the field
 (or `"full"`) to stay open; paid services are door-gated automatically.
 
+**Platform-set flags (not in the registration body):** the Usion team sets
+these on the service doc on request — `background_audio: true` keeps the app's
+audio playing while the mobile app is backgrounded (radio/podcasts; see
+"Background audio" in `sdk-reference.md`), and `capabilities.friends_check:
+true` enables the signed friendship check below. Clients see
+`background_audio`; `capabilities` is never returned to clients.
+
 **Public | Private:** `"visibility": "private"` (with
 `"allowed_usernames": ["bat", ...]`, up to 50) makes a service visible only to
 you and those people. For them it shows up first in every Explore row, in the
@@ -203,6 +210,29 @@ await fetch(`${API_URL}/services/${SERVICE_ID}/notify`, {
 ```
 
 E2E test: `cd backend && python -m scripts.test_notifications`.
+
+## Server-verified friendships (your backend → "are these my viewer's friends?")
+
+For server-side friends-only gates (a `Usion.cloud.friends` value is only a
+hint). Opt-in per service (`capabilities.friends_check: true`, set by the Usion
+team); same signing secret and header as `/notify`.
+
+```
+POST {API_URL}/services/{service_id}/friendships
+Header  X-Usion-Signature: sha256=<hex HMAC-SHA256 of the raw body>
+Body    {"iframe_token": "<the viewer's CURRENT iframe token>", "candidate_ids": ["uuid", ...], "ts": <unix seconds>}
+→ 200   {"user_id": "<viewer>", "friend_ids": ["uuid", ...]}
+```
+
+- The iframe token must be valid **for this service** and not a guest's — a
+  service can only ask about a user signed into it right now, and only about
+  that user's own friendships.
+- Answer = accepted (mutual-consent) friends among the candidates, blocks in
+  either direction removed, in candidate order, deduped.
+- Errors: `400` bad body / >100 candidates / `ts` outside ±300 s, `401` bad
+  signature or token, `403` not opted in or no secret, `404` unknown service,
+  `429` over 120 requests/min per service. Cache answers a few minutes.
+- Tests: `cd backend && python -m pytest tests/test_service_friendships.py`.
 
 ## Releasing an SDK change (only if the app needs a new SDK API)
 

@@ -6,7 +6,7 @@ description: >-
   create, modify, or ship anything that runs inside Usion — a mini-app, a game
   (single-player or multiplayer), an iframe service, a chat widget, or a
   microservice — or asks what the Usion SDK can do (Usion.game, Usion.wallet,
-  Usion.cloud, Usion.notify, lobby, matchmaking, leaderboard, netcode). Also use it when
+  Usion.cloud, Usion.notify, Usion.call voice, lobby, matchmaking, leaderboard, netcode). Also use it when
   registering a service in the Usion registry or deploying to S3/Vercel/Railway
   for Usion, even if the user doesn't say "SDK" explicitly.
 ---
@@ -136,6 +136,7 @@ Quick map of what the platform offers (full signatures in the SDK reference):
 - **Multiplayer**: `Usion.game.connect/join/action/realtime` + `on*` handlers; netcode helpers (interpolation, prediction, delta snapshots, lockstep, WebRTC mesh, WebTransport, `Usion.netcode.createInterestGrid` AOI spatial hash). World rooms (SDK ≥ 2.23): tag `world` + `Usion.game.joinWorld()` for drop-in/drop-out rooms with backfill — up to 200 players direct/hosted, 32 on the platform relay; hosted mode (`realtime.connection_mode: "hosted"` + a one-file server bundle the platform runs) — see the multiplayer reference
 - **Launch mode**: `Usion.getLaunchParams().mode` is `'single'` (opened from Explore / the Game hub, solo) or `'multiplayer'` (opened from a chat game invite); `Usion.game.isMultiplayer()` is the boolean. Branch your setup on it — don't infer mode from `roomId`, the host declares it. (SDK ≥ 2.18)
 - **Social**: `Usion.lobby.*` (parties + codes), `Usion.matchmaking.find/cancel/onMatch`, `Usion.leaderboard.submit/top/friends/me`
+- **Voice** (SDK ≥ 2.35): your game draws a mic button; `Usion.call.micOn({channel})` (from a TAP) joins a voice channel you name — everyone in the same channel talks; `micOff()` leaves; `onSpeaking(ids)` lights up who is talking. Default `scope:'room'` = only players seated in this game room; `scope:'game'` = shared across the whole game (lobbies, open tables). Host handles audio, the mic prompt, mute/block/report. Hide the button when `!Usion.call.isAvailable()`. See the SDK reference "Voice" section.
 - **Records & leaderboards** — **every game enables this** (see the game checklist in Step 3.5). Set `leaderboard: {enabled: true, order: "desc"|"asc", max_score?}` on the service and call `Usion.leaderboard.submit(score)` on game over. You get the platform's records loop for free: your game appears in **Game Center** (players see their best + friends' records), and beating a friend's best auto-sends them a "«Name» beat your record" notification that reopens your game. Show `Usion.leaderboard.friends()` on your game-over screen. Reference app: **Flappy** (see references/publishing.md). Details in the SDK reference "Leaderboard + records" section.
 - **Invite friends**: `Usion.game.invite()` opens the host's friend/group picker (recent + username search + groups, multi-select) and fills your room — tappers join THIS room and you get `onPlayerJoined`. Works even when launched solo (host makes a room, joins you as host). The host ALSO shows a top-bar **Share** button on every game (same picker) — using it promotes a solo launch into a room and fires `Usion.game.onRoomAssigned`. Don't build your own invite/Share UI. (SDK ≥ 2.20)
 - **Chat integration**: `Usion.chat.sendMessage/createPersonalChat`, `Usion.bot.*` for inline bot widgets
@@ -145,7 +146,16 @@ Quick map of what the platform offers (full signatures in the SDK reference):
 - **Results, export & sharing**: `Usion.saveResult`; `Usion.share` for the
   platform share UI; `Usion.shareFile` for a real attachment in WhatsApp,
   Telegram, Mail, etc.; `Usion.download` for Gallery or Files/Downloads;
-  `Usion.shareToFeed` for an attributed Usions post. Use the host APIs—not an
+  `Usion.shareToFeed('text', {text, path?, card?})` to post to the user's News Feed +
+  profile with a link back to `path` in your app (`card: {title, subtitle?}` = the
+  shared item shown as a tappable card, `text` = the caption, optional `image` =
+  that card as a ≤5 MB png/jpeg/webp data URL only when
+  `Usion.canShareToFeed('image')`, your app is mentioned automatically; show
+  the button only when
+  `Usion.canShareToFeed()` is true; host confirms EVERY time; for video up to 3 GiB use `uploadFeedVideo(file)` (SDK ≥ 2.34.0; older SDKs are limited to 100 MiB) and pass its receipt as `videoReceipt` to `shareToFeed('video', ...)` after checking `canShareToFeed('videoUpload')` (SDK ≥ 2.33.0);
+  `CANCELLED` = user said no; public apps only; 5/min, 30/day; SDK ≥ 2.33);
+  `Usion.openApp(serviceId, path?)` opens an app at a path. Handle incoming
+  paths with `getLaunchParams().path` + `Usion.onHostNavigate`. Use the host APIs—not an
   iframe `<a download>`, `window.open`, or direct `navigator.share` call—so the
   same action works in the mobile WebView and on web. See the SDK reference
   “Results, file export, and sharing” section.
@@ -193,7 +203,8 @@ Mini Golf, Sequence, Ludo). Full detail in
    `leaderboard: {enabled: true, order}` on the service and `submit()` on game
    over; show `Usion.leaderboard.friends()` + `top({limit:10})` on the
    solo end screen (death, loss, or victory), with Friends/Global tabs and
-   loading/empty/error states. No number? Submit wins, best time, or level reached.
+   loading/empty/error states. Every other player's row is a button that opens
+   their Usion profile: `Usion.user.openProfile(entry.user_id)` (SDK ≥2.33). No number? Submit wins, best time, or level reached.
    Level-based game? The board value is the player's LAST state — register
    `metric: "level"` and submit the level they are currently on every time it
    changes, not a per-run score.

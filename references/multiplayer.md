@@ -184,6 +184,16 @@ Rules:
 - Keep it reachable during play (a small toggle), dismissible with Escape /
   outside tap, and never covering the active play area.
 
+## In-game voice (optional, SDK ≥ 2.35)
+
+Quick chat is still required; voice is the extra for games people play with
+friends. Put a mic button next to your quick-chat button and use
+`Usion.call.micOn({ channel })` (see the SDK reference "Voice"). Pick the channel
+from your game's own structure: the table/room (`scope: 'room'`, default —
+only seated players), a team (`channel: 'team-red'`), or a game-wide lobby
+(`scope: 'game'`). Light up the talking player's seat from
+`Usion.call.onSpeaking`. Never turn the mic on without a tap.
+
 ## The contract
 
 0. **Know your mode (SDK ≥ 2.18)** — see "The required shape" above.
