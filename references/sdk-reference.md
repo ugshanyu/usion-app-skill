@@ -631,7 +631,22 @@ Usion.call.onChange(state => …)    // joins, leaves, mic, connection
 Usion.call.onSpeaking(userIds => …) // who is talking now (≤ 4 updates/s)
 // VoiceState: { on, channel, scope, status: 'idle'|'connecting'|'connected'|'reconnecting',
 //               micOn, peers: [{ userId, name, isMe, micOn, speaking }] }
+
+// SDK ≥ 2.37 — how many people are in a channel, joined or not:
+const off = Usion.call.onCount({ channel: 'table' }, n => badge.textContent = n ? `${n} talking` : '',
+                               err => badge.hidden = true)   // live; off() stops it
+await Usion.call.count({ channel: 'lobby', scope: 'game' })  // one-shot number
 ```
+
+**Head count — your call to show it.** The host's live-mic pill shows no number;
+if your game wants a "3 talking" badge (on the mic button, on each table in a
+lobby list), use `onCount`. It works before the player joins, includes the
+player once they're in, and gives only the number — never who. Same access as
+joining: a `scope: 'room'` channel needs a seat in the room (`VOICE_NO_ROOM` /
+`VOICE_NOT_IN_ROOM` otherwise). Up to 16 channels watched at once; app versions
+without it (`Usion.config.hostFeatures.voiceCount` false) fail with
+`VOICE_UNSUPPORTED` — hide the badge. Once joined, `state.peers.length` is the
+same number for your own channel (minus anyone you blocked).
 
 **Scopes.** `scope: 'room'` (default) ties the channel to the current game room —
 only players seated in that room can join, so invite games stay private. It
@@ -668,14 +683,16 @@ Rules:
   show `micOn === false` peers with a muted icon. Bots are never in `peers`.
 - Leaving the game screen ends voice; you don't need to clean up. Backgrounding
   the app keeps it (like a phone call).
-- The host shows a live-mic pill over your game while voice is on; don't draw a
-  second "leave call" control that fights it — your mic button is enough.
+- The host shows a live-mic pill (mic icon only, no number) over your game while
+  voice is on; don't draw a second "leave call" control that fights it — your
+  mic button is enough.
 - Errors: `VOICE_UNSUPPORTED` (old app — hide the button), `VOICE_DECLINED`,
   `VOICE_MIC_DENIED`, `VOICE_NO_ROOM`, `VOICE_NOT_IN_ROOM`, `VOICE_FULL` (16 per
   channel, or the room's max players), `VOICE_DISABLED`, `VOICE_GUEST` (web
   visitor not logged in), `VOICE_BAD_CHANNEL`, `VOICE_FAILED` (network).
-- The devkit emulates channels across tabs (`usion dev`): two tabs in the same
-  channel see each other in `peers`; the chaos panel fakes talking and drops voice.
+- The devkit emulates channels across tabs (`usion dev`, devkit ≥ 0.4; counts
+  ≥ 0.5): two tabs in the same channel see each other in `peers` and in
+  `onCount`; the chaos panel fakes talking and drops voice.
 
 ## Matchmaking
 
@@ -1815,3 +1832,55 @@ if (consent.permissions.profile_content) {
 - The host binds the signed-in user and current service. Mini-apps cannot select
   another owner or service, grant themselves access, or read Record/Right now
   data through this API. Existing leaderboard APIs continue to supply Record.
+
+### Login-aware routing and tab control (SDK ≥ 2.36)
+
+Support is declared by `Usion.config.hostFeatures.auth` and
+`Usion.config.hostFeatures.tabControl`. New request methods reject with
+`UNSUPPORTED` on older hosts; retain existing in-app navigation as a fallback.
+
+```javascript
+await Usion.init();
+function updateAccess() {
+  const signedIn = Usion.user.getAuthState().status === 'authenticated';
+  return Usion.tabs.configure({
+    landingTab: 'services',
+    landingPath: signedIn ? '/services' : '/services/login',
+    lockedTabs: signedIn ? [] : ['chat', 'schedule'],
+    fallbackTab: 'services',
+    fallbackPath: signedIn ? '/services' : '/services/login'
+  });
+}
+Usion.user.onAuthChange(() => updateAccess().catch(showError));
+await updateAccess();
+Usion.tabs.onBlocked(({ tab }) => showLoginModal(tab));
+loginButton.onclick = () => Usion.user.requestLogin({ returnPath: '/services' });
+viewBookingButton.onclick = () => Usion.tabs.open('schedule', {
+  path: '/schedule?date=2026-11-04#appointments'
+});
+```
+
+- `user.getAuthState()` returns `{status: 'loading'|'authenticated'|'guest', userId}`.
+  Guest/loading `userId` is null; `getId()` may still return a local guest label.
+- `user.onAuthChange(callback)` returns an unsubscribe. It fires on state/account
+  changes, not routine token refresh. Read the initial snapshot with `getAuthState()`.
+  Logout and account changes clear cached identity, credentials and account snapshots.
+- `user.requestLogin({returnPath?})` resolves when host login opens or the user
+  is already signed in, not when login completes. Call from a user action and
+  observe auth changes. Credentials stay in the host login flow.
+- `tabs.configure({landingTab?,landingPath?,lockedTabs?,fallbackTab?,fallbackPath?})`
+  replaces the lock list. Landing applies on first configuration and after setup
+  unlocks access when no explicit navigation intent exists; valid explicit deep links take precedence. A locked current or deep-linked tab goes to the allowed fallback.
+- `tabs.open(tab, {path?})` targets a tab and optional internal section. The host
+  validates registered tab keys and safe relative paths for this service.
+- `tabs.onBlocked(callback)` receives `{tab,path?}` and returns an unsubscribe.
+  Show an app modal whose button navigates to an allowed tab.
+- Locks are presentation controls, not authorization. Protected APIs must still
+  verify the current account and business. Never fetch private data while logged out.
+- The host can mount one persistent app pane in the background. Subscribe early
+  to `onHostNavigate`, fetch shared data once after authentication, and retain
+  page state to avoid repeating startup and network requests when switching sections.
+
+Identity-bound pending SDK requests reject with `AUTH_CHANGED` after logout or an account transition; late old responses are ignored. Host login/navigation requests are not account data and remain pending normally.
+
+Apps can combine the host auth snapshot with their own backend credential/access check before configuring tabs. Missing app credentials can select a setup/login path even when the user is already signed into Usions. Never put secret credentials in tab policy or path parameters.
