@@ -615,8 +615,10 @@ Players talk to each other through the platform's voice calls. **Your game draws
 its own mic button; turning it on puts the player in a voice channel, and
 everyone in the same channel hears each other.** Channels are names YOU pick —
 one per table, team, lobby, whatever your game needs. The host app does the
-audio, asks for the microphone once per game, and owns safety (mute, block,
-report) and limits. You never get audio streams or tokens.
+audio, asks for the microphone once per game, enforces access, blocks and
+limits — and **draws nothing over your game**: no pill, no sheet, no call
+screen. Every voice control the player sees is yours. You never get audio
+streams or tokens.
 
 ```javascript
 Usion.call.isAvailable()           // false on old app versions → hide the mic button
@@ -638,7 +640,7 @@ const off = Usion.call.onCount({ channel: 'table' }, n => badge.textContent = n 
 await Usion.call.count({ channel: 'lobby', scope: 'game' })  // one-shot number
 ```
 
-**Head count — your call to show it.** The host's live-mic pill shows no number;
+**Head count — your call to show it.** The host shows no voice UI at all;
 if your game wants a "3 talking" badge (on the mic button, on each table in a
 lobby list), use `onCount`. It works before the player joins, includes the
 player once they're in, and gives only the number — never who. Same access as
@@ -683,9 +685,11 @@ Rules:
   show `micOn === false` peers with a muted icon. Bots are never in `peers`.
 - Leaving the game screen ends voice; you don't need to clean up. Backgrounding
   the app keeps it (like a phone call).
-- The host shows a live-mic pill (mic icon only, no number) over your game while
-  voice is on; don't draw a second "leave call" control that fights it — your
-  mic button is enough.
+- **You own the whole voice UI.** The host shows nothing while voice is on, so
+  your game must make it obvious: a mic button whose look says on / off /
+  connecting (`onChange`), who is talking (`onSpeaking`), and a way to leave
+  (`micOff`). Offer "mute for me" per player (`mutePeer`) wherever you list
+  people in voice. Blocks made anywhere in the app already apply in voice.
 - Errors: `VOICE_UNSUPPORTED` (old app — hide the button), `VOICE_DECLINED`,
   `VOICE_MIC_DENIED`, `VOICE_NO_ROOM`, `VOICE_NOT_IN_ROOM`, `VOICE_FULL` (16 per
   channel, or the room's max players), `VOICE_DISABLED`, `VOICE_GUEST` (web
