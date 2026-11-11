@@ -43,14 +43,45 @@ User-Agent, e.g. `UsionsRegistryHelper/1.0`; the included helper sets it. Some e
 filters reject Python's default `Python-urllib` user agent with HTTP 403 even
 while curl and identified application clients work.
 
-An HTTP response means the server/edge was reached. Distinguish DNS failure,
-connection/TLS failure, timeout, HTTP 401, and HTTP 403. Never call the server
-“unreachable” merely because a request returned 403. Use authenticated `GET /v1/games` as the preflight. The gateway deliberately
-returns 404 for `/health`, `/docs`, and every unrelated route. Compare curl
-or the helper's explicit User-Agent. Do not disable TLS verification, expose credentials, or bypass a
-login/challenge. If access is still denied, report the URL, client, HTTP status
-and sanitized diagnostic; do not claim a global outage. A registry 401 indicates
-missing/invalid/expired authentication; request a replacement only when needed.
+### Browser ChatGPT and proxy-aware preflight
+
+Use **Work** mode for code/shell publishing when available and authorized. A
+normal Chat-mode code container may be unable to make outbound requests. Giving
+that container a ZIP or token does not change its network capabilities.
+
+1. Use the bundled helper rather than an ad-hoc client with Python's default
+   User-Agent. `urllib` in the helper honors the environment's configured HTTPS
+   proxy. Do not disable that proxy or force direct connections.
+2. Run `python3 scripts/registry.py list`. A 200 response with an owned-game list
+   proves both connectivity and authentication. Continue with upload/register.
+3. To diagnose connectivity without a token, send `GET
+   https://agents.usions.com/v1/games` with `User-Agent:
+   UsionsRegistryHelper/1.0`. A 401 JSON response `{"detail":"Not authenticated"}`
+   with `X-Usions-Gateway: games-v1` is an expected successful reachability check;
+   it does not prove token validity. `/health` and `/docs` intentionally return 404.
+4. Do **not** use `socket.getaddrinfo`, `dig`, or `nslookup` as a hard gate. In a
+   proxy-managed runtime they can fail while the authenticated HTTPS request
+   succeeds. Test the actual HTTPS operation using the approved proxy.
+5. An HTTP 403 alone proves neither an origin outage nor a network allowlist
+   denial. Inspect sanitized status, body and relevant response headers. Use the
+   explicit User-Agent and report only what the response or tool policy proves.
+   Never print proxy credentials, environment secrets, or Authorization headers.
+6. If approved networking is unavailable, use the platform's supported permission
+   flow or ask the owner to use a permitted environment. Where available, Work's
+   individual network control is under **Settings → Data controls → Work network
+   access**. Administrator restrictions still apply. Do not change DNS servers,
+   hardcode IPs, disable TLS checks, or bypass network/security policy.
+
+On 2026-11-11, the browser Chat test failed DNS for agents.usions.com, usions.com
+and example.com. In Work, an HTTPS request through the configured proxy with the
+helper User-Agent reached the gateway even though raw DNS failed. This is evidence
+for that tested environment, not a promise about every account or chat mode.
+See [official Work network controls](https://learn.chatgpt.com/docs/enterprise/chatgpt-work-overview#network-access-and-external-destinations).
+
+Distinguish DNS failure, connection/TLS failure, timeout, unauthenticated 401 and
+403. If a request **with the token** returns 401, check token expiry/revocation;
+do not request a replacement based on the expected token-free preflight 401.
+Report the URL, client, status and sanitized diagnostic when blocked.
 Do not silently try other auth families. This token grants only `games:upload`, `games:read`, `games:create`, and
 `games:update`. It cannot delete games, mint credentials, rotate notification
 secrets, create bots/apps/skills, or access chat/wallet/admin APIs. Calling the old

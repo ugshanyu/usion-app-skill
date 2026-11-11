@@ -30,6 +30,13 @@ hosting account is needed. Use the game-only API documented there,
 not the separate `usk_live_` creator API. Keep the token out of generated apps,
 public hosting, source control, logs, screenshots, and replies.
 
+**Browser ChatGPT:** use **Work** with authorized code/shell network access for
+publishing. A normal Chat code container may have no outbound HTTPS. Run the
+included `python3 scripts/registry.py list` in Work using its configured HTTPS
+proxy and explicit User-Agent. Do not require a raw DNS lookup to succeed first:
+the approved proxy may resolve the host even when local DNS fails. See the
+network preflight in external-agent-release.md before declaring the API blocked.
+
 A ZIP attachment does not install tools or grant a chat environment shell/network/
 browser capabilities. If available, extract and read the referenced files. If the
 chat cannot read ZIPs, execute deployment, or send authenticated HTTP requests,
