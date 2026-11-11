@@ -1,4 +1,11 @@
-# Registering & managing services from an AI agent (REST API)
+> **Not the route for Service Creator download tokens.** Private downloads include `credentials.env` with a
+> personal `usion_sk_` token. Use [external-agent-release.md](external-agent-release.md)
+> and publishing.md Path C: `https://agents.usions.com/v1/games/uploads` for static uploads,
+> `/v1/games` for game registration/listing, and `/v1/games/{id}` for owned-game status/updates.
+> The older/separate creator API below requires a different credential. Do not
+> try the included token against it or ask the user to create another key first.
+
+# Separate creator API (`usk_live_` keys only)
 
 A creator can let their **AI agent** create and manage Usion services
 autonomously by handing it a **creator API key**. The agent drives the creator

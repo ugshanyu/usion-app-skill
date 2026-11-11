@@ -1,5 +1,13 @@
 # Publishing a Usion app + live deployed references
 
+**External agents:** start with [external-agent-release.md](external-agent-release.md).
+The private download's personal token now supports static hosting directly:
+`POST https://agents.usions.com/v1/games/uploads` (raw ZIP or HTML), then
+`POST https://agents.usions.com/v1/games` using its returned iframe_url. No separate
+hosting account is needed. The bundled helper performs both steps and can verify
+the served asset hashes. Path A below describes the internal builder; its paths
+are not upload instructions for an external agent.
+
 ## Path A — Static bundle (AI-Creator pipeline)
 
 Bundle = self-contained `index.html` (CSS/JS inlined, no CDNs, no build step).
@@ -49,30 +57,31 @@ Avoid all five by construction.
    writing, prefix test entities.
 4. Local dev ports are assigned in CLAUDE.md's Service Ports table; add yours.
 
-## Path C — Programmatic registration with an API token (agents / automation)
+## Path C — Direct Usions game hosting with a restricted API token
 
-When an AI agent or script registers and manages services without a human in
-the loop, authenticate with a **personal API token** instead of a seed script.
-
-1. The owner mints a token in the app: **Service Creator → Agent API Access →
-   Create API token**. The raw token (`usion_sk_…`) is shown **once** — copy it.
-   Tokens are long-lived, revocable, and listed/revoked from the same screen.
-2. The agent calls the registry with `Authorization: Bearer usion_sk_…`. The
-   token acts as the owning user but is **scoped to service management only** —
-   it is rejected on wallet/chat/etc., so it's safe to hand to an agent.
+Private downloads use **https://agents.usions.com**, with a revocable personal
+`usion_sk_` token valid for at most 30 days. Load it privately from credentials.env.
+Only game upload, registration, owned-game status and owned-game updates are
+allowed. The backend enforces scopes even if callers use another hostname.
+Existing non-skill integrations with older credentials are separate; do not use
+their service-management APIs with a game-agent download token.
 
 ```
-POST   {API_URL}/registry/services/register          # register (app/game/bot/skill)
-GET    {API_URL}/registry/services/my                 # list your services
-PUT    {API_URL}/registry/services/my/{id}            # update
-PATCH  {API_URL}/registry/services/my/{id}/publish    # publish / unpublish
-DELETE {API_URL}/registry/services/my/{id}            # delete
-POST   {API_URL}/registry/services/my/{id}/notify-secret   # mint/rotate notify secret
+POST /v1/games/uploads          # raw ZIP/HTML → hosted URL + manifest
+GET  /v1/games/uploads/{id}     # owner-only upload status
+POST /v1/games                 # register a game from your own upload
+GET  /v1/games                 # list owned games
+GET  /v1/games/{id}            # owned-game status
+PUT  /v1/games/{id}            # update metadata/URL/publish state
 ```
 
-Register body matches the Service Creator form: `{name, description, service_type,
-iframe_url, cost, tags, is_published, realtime?, max_players?, genre?, ...}`. A `bot`
-service also returns `bot_credentials` (token + webhook secret) once.
+Use `scripts/registry.py`; see external-agent-release.md for the full sequence.
+No delete, secret rotation, token creation, bot/skill/app management or player
+login is available. New iframe_url values must match your own hosting receipt.
+Register body: `{name, description, service_type: "game", iframe_url, image,
+cost, tags, is_published, realtime?, multiplayer?, max_players?, genre?, sdk?,
+leaderboard?, visibility?, allowed_usernames?, header_theme?}`. Platform
+multiplayer is supported; custom servers/webhooks and unknown fields are rejected.
 
 **Explore category (games):** `genre` is `strategy` (think: puzzle, cards,
 board, turn-based, quiz) or `action` (react: shooters, racing, arcade, sports,
@@ -80,6 +89,9 @@ reflex). It picks the game's category row on Explore; the other rows — Most
 played, Trending, New games, Best multiplayer games — are computed from usage,
 live players, publish date and the `multiplayer` tag. Omit it and the platform
 infers one from the tags and name when it can; set it explicitly to be sure.
+
+> The general service features below describe host behavior and separately
+> authorized service integrations. They do not expand the game-token allowlist.
 
 **Guest access (web):** logged-out visitors can open free services from shared
 links by default and are asked to log in only when they try to save or send
@@ -150,7 +162,8 @@ E2E test: `cd backend && python -m scripts.test_service_tabs`.
 Instead of operating direct-mode infrastructure yourself (Path B on Railway),
 ship ONE server bundle file and let the platform rooms runtime execute it —
 bundle contract and runtime guarantees in `references/multiplayer.md` "Hosted
-rooms". Registration works through any path above (seed script or Path C API):
+rooms". This requires a separately authorized internal/creator path. The restricted
+Path C game-agent token supports platform relay only, not custom hosted server code:
 
 - `realtime: { connection_mode: "hosted", server_bundle_url: "https://…/server.js" }`.
   `server_bundle_url` is REQUIRED: https with a publicly reachable host
@@ -190,9 +203,10 @@ Body    {"user_id": "...", "title": "...", "body": "...", "path": "/optional/in-
     flow mints one too. Lost it? Rotate (owner-only):
     `POST /services/{id}/signing-secret/rotate` → fresh `signing_secret`, old one
     dies immediately.
-  - **Mobile-user path** (`usion_sk_…` token, Service Creator UI): mint/rotate via
-    `POST /registry/services/my/{id}/notify-secret` (returns the secret once; see
-    Path C).
+  - **Mobile-user path** (Service Creator UI with a real login, or a legacy
+    non-skill service integration token): mint/rotate via
+    `POST /registry/services/my/{id}/notify-secret`. Restricted game-agent tokens
+    cannot call this endpoint.
   - **Seed script** (`KLING_NOTIFY_SECRET` → `seed_*.py`) for first-party
     services that set it explicitly.
 - **Scope/limits:** identical to `Usion.notify` — only that service's user,

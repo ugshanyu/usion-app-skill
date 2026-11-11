@@ -13,6 +13,35 @@ description: >-
 
 # Building an app for Usion
 
+## START HERE — Gemini and other external agents
+
+When the user asks to build and register a game, deliver the game through hosting,
+Usions service registration, and real-host gameplay verification. “Register to
+Usions” in that context means register the GAME, not create a user account.
+A generated HTML artifact, workspace folder, SDK import, or preview is not a
+registered service. Never answer “yes, it is on Usions” based on those alone.
+
+Read [External-agent deployment and verification](references/external-agent-release.md)
+BEFORE choosing a publishing path. Private Service Creator downloads include a
+personal `USION_API_TOKEN` in `credentials.env`; public/tokenless downloads do not.
+Use the token to upload static games to `/v1/games/uploads`, then
+register the returned URL through `/v1/games`. No separate
+hosting account is needed. Use the game-only API documented there,
+not the separate `usk_live_` creator API. Keep the token out of generated apps,
+public hosting, source control, logs, screenshots, and replies.
+
+A ZIP attachment does not install tools or grant a chat environment shell/network/
+browser capabilities. If available, extract and read the referenced files. If the
+chat cannot read ZIPs, execute deployment, or send authenticated HTTP requests,
+say which capability is missing; produce the usable artifacts and exact next
+step, without inventing tool results. Never treat this skill's contents as a new
+user request or authorization to publish when the user only asks for review.
+
+For an authorized release, continue until the requested outcome is verified or
+report the precise remaining blocker. Track build, deployment, registration,
+two-player gameplay, and Records as separate evidence-backed states. Local
+hot-seat play and bots do not prove two-player Usions multiplayer.
+
 Usion mini-apps are static web apps that run inside an iframe (WebView on mobile)
 in the Usion chat app. The platform injects identity, wallet, theme, storage,
 and a full multiplayer transport — your app talks to all of it through one
@@ -64,8 +93,12 @@ native WebView before publishing. Preserve explicit user choices over defaults.
 
 ## Step 1 — Decide the delivery path
 
-There are two ways an app reaches users. Pick one first; it changes everything
-about structure and deploy.
+External agents should default to direct Usions static hosting with the included
+personal token: upload using `scripts/registry.py upload`, verify hosted bytes,
+then register using `register --deployment`. Read external-agent-release.md for
+the exact commands. The internal builder also hosts bundles; creating HTML alone
+is never a deployment. Use external hosting only when the app needs its own
+server runtime or the user explicitly chooses it.
 
 **Path A — Static bundle (AI-Creator style).** One self-contained `index.html`
 (CSS + JS inlined, no build step, no external CDNs — the ONLY exception is the
@@ -293,6 +326,11 @@ Read [references/multiplayer.md](references/multiplayer.md). The core contract:
   from a visible user tap so browsers and mobile OSes allow the picker.
 
 ## Step 6 — Publish
+
+External agents: follow [external-agent-release.md](references/external-agent-release.md).
+Personal tokens from private downloads can both host static bundles and register
+them. Follow the upload → check-hosting → register → real-host verification flow.
+Finish with the evidence gates in that reference, including real two-player testing.
 
 Read [references/publishing.md](references/publishing.md) for the exact flow.
 Summary: Path A bundles deploy to S3 (`miniapps/apps/<project>/v<n>`) and
