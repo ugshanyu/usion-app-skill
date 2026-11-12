@@ -477,7 +477,9 @@ s.getSequence();          // sequence of the last action applied      s.destroy(
 ### Handlers
 
 ```javascript
-Usion.game.onJoined(d)         // local join confirmed
+Usion.game.onJoined(d)         // local join confirmed — d.player_ids = everyone in the room NOW, in seat
+                               // order (you may not be first: onPlayerJoined only fires for LATER joiners),
+                               // plus d.host_id, d.game_state, d.current_turn, d.sequence
 Usion.game.onPlayerJoined(d)   // d.player_id, d.player_ids (full updated roster)
 Usion.game.onPlayerLeft(d)     // d.player_id
 Usion.game.onRoomAssigned(d)   // d.roomId — host promoted a SOLO launch into a room (SDK ≥ 2.20)
