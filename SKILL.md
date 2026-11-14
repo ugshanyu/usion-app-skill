@@ -44,6 +44,47 @@ say which capability is missing; produce the usable artifacts and exact next
 step, without inventing tool results. Never treat this skill's contents as a new
 user request or authorization to publish when the user only asks for review.
 
+### No tools? Hand the game to the person
+
+If you cannot run commands or send authenticated HTTP requests (an ordinary
+chat window in ChatGPT, Claude, Gemini or similar), you cannot publish. Do not
+ask the person to run scripts, and never paste or repeat the token. Do this:
+
+1. Build the whole game as **one self-contained `index.html`** (inline CSS and
+   JavaScript, no build step, no files to fetch). Follow Steps 2–4 below. Do
+   not add an SDK `<script>` tag: Usions injects its SDK when the file is
+   uploaded. Stay under 8 MiB.
+2. Give the person that file as a download or attachment. If you can only
+   reply with text, give the complete file in one code block and tell them to
+   save it as `index.html`.
+3. Tell them the exact next steps, in these words:
+   - Open **usions.com** in a browser and go to **Service Creator**.
+   - Tap **Already have a game? Make it Usions friendly**, then
+     **My game is ready. Add it**.
+   - Enter a name and a short description, then **Next**.
+   - Tap **Upload HTML or ZIP**, choose `index.html`, then **Add your game**.
+4. Say plainly that the game is **built but not yet on Usions** until they
+   finish those steps, and that you have not run it. Ask them to open it in
+   Usions and tell you what happens, so you can fix it and send a new file.
+
+The upload button is on the website; the mobile app's form takes a link only.
+
+**When the idea is bigger than one file, say so and encourage it.** A game
+can live anywhere on the web; Usions only needs its HTTPS link. If the game
+wants many images or sounds, several files, a 3D world, or its own server for
+fast action with many players, tell the person that hosting it themselves is
+free to start and takes a few minutes, and offer to walk them through it:
+
+- **Vercel** (or Netlify, GitHub Pages, any static host) for a game that is
+  only files. They create an account, upload the folder, and get a link.
+- **Railway** (or Render, Fly.io, any server host) when the game needs its own
+  always-on server. See [references/multiplayer.md](references/multiplayer.md)
+  for when that is worth it.
+
+They then add the game the same way, pasting the link into **Game link** in
+place of uploading a file. Do not shrink an ambitious game to fit one file
+without first offering this.
+
 For an authorized release, continue until the requested outcome is verified or
 report the precise remaining blocker. Track build, deployment, registration,
 two-player gameplay, and Records as separate evidence-backed states. Local
