@@ -240,7 +240,7 @@ Quick map of what the platform offers (full signatures in the SDK reference):
   iframe `<a download>`, `window.open`, or direct `navigator.share` call—so the
   same action works in the mobile WebView and on web. See the SDK reference
   “Results, file export, and sharing” section.
-- **Lifecycle/UI**: `Usion.exit()`, `Usion.claimBackButton(cb)`, `Usion.setLoading`, `Usion.toggle`, theme/language getters
+- **Lifecycle/UI**: `Usion.exit()`, `Usion.claimBackButton(cb)`, `Usion.setHeaderTitle(title)`, `Usion.setLoading`, `Usion.toggle`, theme/language getters
 
 Backend-channel modules (lobby `lobby:*`, matchmaking `mm:*`, leaderboard
 `lb:*`, cloud `kv:*`, notify `notify:*`) work both standalone and embedded automatically. Adding a

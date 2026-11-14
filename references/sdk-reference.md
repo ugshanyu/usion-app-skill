@@ -1269,6 +1269,7 @@ Usion.diagnostics()                  // {version, transport, connected, joined, 
 Usion.getTheme()                     // 'light'|'dark'
 Usion.getLanguage()                  // e.g. 'en', 'mn'
 Usion.claimBackButton(cb) / Usion.releaseBackButton()
+Usion.setHeaderTitle(title)          // name this page in the host header (SDK ≥ 2.39)
 ```
 
 Use the host file APIs for exports—never rely on an iframe `<a download>`,
@@ -1479,6 +1480,29 @@ function showScreen(render, onBack) {
   else Usion.releaseBackButton();   // root screen: host shows ✕ (close)
 }
 ```
+
+### Header title: one back button, the host names the page (SDK ≥ 2.39)
+
+Inner pages work like a stack: opening a page pushes it, the host's back
+button (or the left-edge swipe / hardware back) pops one. **Do not draw your
+own title bar or back arrow** — on every page change claim the back button and
+tell the host what the page is called:
+
+```javascript
+function showScreen(render, title, onBack) {
+  render();
+  Usion.setHeaderTitle(title || '');          // '' = your app's name (root)
+  if (onBack) Usion.claimBackButton(onBack);  // one-shot: re-claimed on the next showScreen
+  else Usion.releaseBackButton();             // root: back leaves the app
+}
+```
+
+Rules the host enforces: the title is trimmed and capped at 60 characters; the
+host hands an app at most **3 backs in a row** (within ~6 s of each other) and
+the next one leaves the app whatever it claims, so keep the common path within
+three levels. `setHeaderTitle` is fire-and-forget — where the host shows no
+header (a full-screen app, an older host) it does nothing, so keep each page
+understandable without it.
 
 ## Hybrid tabbed services (SDK ≥ 2.25)
 
