@@ -793,6 +793,9 @@ Service config (set at registration / publish):
 // metric (optional): "score" (default) · "level" — for a LEVEL-based game,
 //   submit the player's CURRENT level (their last state, see below) and set
 //   "level"; the Game Center hub then shows "Level 42" instead of a bare number.
+//   · "floor" — for a game climbed floor by floor (towers, dungeons), submit
+//   the highest floor cleared; the hub and the record/top-5 chat cards then
+//   read "Floor 18" ("They reached floor 18 · you're on floor 15").
 // max_score (optional): scores beyond this still record but never fire record
 //   notifications — a plausibility guard against forged scores.
 ```
