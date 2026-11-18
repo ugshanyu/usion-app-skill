@@ -132,62 +132,17 @@ It must NEVER: create or switch rooms, show a room code, draw its own
 invite/share picker, or show matchmaking/wager UI — the platform owns all of
 that.
 
-## In-game chat: quick phrases + free text (required)
+## No in-game chat
 
-Players sitting in the same room want to talk without leaving the game. Every
-multiplayer game ships both halves (Table Soccer is the reference):
-
-- **Quick chat** — a small tap-to-send list of canned phrases (~6–10, localized
-  with the rest of your strings, trash talk included). This is the primary
-  path: it's one tap, needs no keyboard, and works while a match is live.
-- **Custom chat** — a "type your own" input reachable from the same picker,
-  with a back button to the phrase list. Same send path, same bubble.
-
-It rides the room relay, not the platform chat:
-
-```javascript
-const MAX_CHAT_LENGTH = 60;
-function normalizeChatMessage(v) {
-  if (typeof v !== "string") return "";
-  const m = v.trim().replace(/\s+/g, " ");
-  return m && m.length <= MAX_CHAT_LENGTH ? m : "";
-}
-function sendChat(value) {
-  const phrase = normalizeChatMessage(value);
-  if (!phrase) return false;
-  if (Date.now() - lastChatAt < 700) return false;    // rate limit — spam guard
-  lastChatAt = Date.now();
-  showChatBubble(myId, phrase);                        // instant local feedback
-  Usion.game.realtime("quick_chat", { phrase });       // fire-and-forget
-  return true;
-}
-Usion.game.onRealtime((m) => {
-  if (m.action_type === "quick_chat" && m.player_id !== myId) {
-    showChatBubble(m.player_id, m.action_data && m.action_data.phrase);
-  }
-});
-```
-
-Rules:
-
-- **`Usion.game.realtime`, never `Usion.chat.sendMessage`** — game chat belongs
-  to the room, not to the players' conversation. It is transient by design: no
-  history, no storage, and it must never ride `action()` (chat is not state and
-  must not replay on reconnect).
-- **Render received text as text.** `element.textContent = phrase` — never
-  `innerHTML`. Re-normalize on receive; a peer can send anything.
-- **Rate-limit** (~700 ms) and cap length on send AND receive.
-- **Ephemeral bubbles** anchored to the sender's seat/avatar, auto-dismissing
-  after ~2 s, so chat never blocks the board or steals a turn.
-- **Hide the affordance when there's nobody to talk to** — solo/bot rounds and
-  the pre-join state. Show it once ≥2 real players are in the room.
-- Keep it reachable during play (a small toggle), dismissible with Escape /
-  outside tap, and never covering the active play area.
+Do not build in-game chat: no quick-chat phrases, no "type your own" box, no
+chat bubbles, no chat button. Players already talk in the Usion chat around the
+game, and a chat layer covers the board on a phone. (Changed 2026-11-18; older
+reference games such as Table Soccer still have one — don't copy it.)
 
 ## In-game voice (optional, SDK ≥ 2.35)
 
-Quick chat is still required; voice is the extra for games people play with
-friends. Put a mic button next to your quick-chat button and use
+Voice is optional, for games people play with friends. Put a small mic button
+in your HUD and use
 `Usion.call.micOn({ channel })` (see the SDK reference "Voice"). Pick the channel
 from your game's own structure: the table/room (`scope: 'room'`, default —
 only seated players), a team (`channel: 'team-red'`), or a game-wide lobby

@@ -274,12 +274,10 @@ Mini Golf, Sequence, Ludo). Full detail in
    (min 2), seat order locked into the match's first stored `action`, plus a
    "play with bots" escape hatch and `Usion.game.invite()` for more players.
    Required for 2-player duels too.
-3. **Multiplayer games have in-game chat: quick phrases + free text.** A
-   tap-to-send list of ~6–10 localized canned phrases plus a "type your own"
-   input, sent with `Usion.game.realtime('quick_chat', {phrase})` (never
-   `Usion.chat.sendMessage`), rendered as short-lived bubbles on the sender's
-   seat. Rate-limit, cap the length, render with `textContent`, and hide the
-   affordance in solo/bot rounds.
+3. **No in-game chat and no sound on/off button.** Players talk in the Usion
+   chat around the game, and sound follows the phone's own volume and silent
+   switch — never draw a quick-chat picker, chat bubbles, a mute or a speaker
+   button.
 4. **Every game has a leaderboard, and it feeds Game Center.** Set
    `leaderboard: {enabled: true, order}` on the service and `submit()` on game
    over; show `Usion.leaderboard.friends()` + `top({limit:10})` on the
